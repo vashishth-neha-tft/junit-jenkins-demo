@@ -15,12 +15,12 @@ pipeline {
                     ]
 
                     if (choice == 'junit') {
-                        RUN_JUNIT = 'true'
+                        env.RUN_JUNIT = 'true'
                     } else if (choice == 'keploy') {
-                        RUN_KEPLOY = 'true'
+                        env.RUN_KEPLOY = 'true'
                     } else if (choice == 'both') {
-                        RUN_JUNIT = 'true'
-                        RUN_KEPLOY = 'true'
+                        env.RUN_JUNIT = 'true'
+                        env.RUN_KEPLOY = 'true'
                     }
                 }
             }
@@ -33,62 +33,47 @@ pipeline {
         }
 
         stage('JUnit Test') {
+            when {
+                expression { env.RUN_JUNIT == 'true' }
+            }
             steps {
-                script {
-                    if (RUN_JUNIT == 'true') {
-                        echo "Running JUnit tests..."
-                        sh 'mvn test'
-                    } else {
-                        echo "Skipping JUnit tests."
-                    }
-                }
+                echo "Running JUnit tests..."
+                sh 'mvn test'
             }
         }
 
         stage('Keploy Test') {
+            when {
+                expression { env.RUN_KEPLOY == 'true' }
+            }
             steps {
-                script {
-                    if (RUN_KEPLOY == 'true') {
-                        echo "Running Keploy tests..."
-                        sh '''
-                        # Download Keploy CLI (if not already installed)
-                        if ! command -v keploy &> /dev/null; then
-                          curl -s https://raw.githubusercontent.com/keploy/keploy/main/install.sh | bash
-                        fi
-
-                        # Run keploy test
-                        keploy test -c "java -cp target/classes com.example.StringUtils"
-                        '''
-                    } else {
-                        echo "Skipping Keploy tests."
-                    }
-                }
+                echo "Running Keploy tests with Docker..."
+                sh '''
+                    docker run --rm \
+                        -v "$(pwd)":/app \
+                        -w /app \
+                        keploy/keploy:latest test -c "java -cp target/classes com.example.StringUtils"
+                '''
             }
         }
 
         stage('Archive JUnit Results') {
+            when {
+                expression { env.RUN_JUNIT == 'true' }
+            }
             steps {
-                script {
-                    if (RUN_JUNIT == 'true') {
-                        echo "Archiving JUnit results..."
-                        junit 'target/surefire-reports/*.xml'
-                    } else {
-                        echo "Skipping JUnit results archiving."
-                    }
-                }
+                echo "Archiving JUnit results..."
+                junit 'target/surefire-reports/*.xml'
             }
         }
 
         stage('Archive Keploy Results') {
+            when {
+                expression { env.RUN_KEPLOY == 'true' }
+            }
             steps {
-                script {
-                    if (RUN_KEPLOY == 'true') {
-                        echo "Archiving Keploy results..."
-                        archiveArtifacts artifacts: 'keploy/reports/**', allowEmptyArchive: true
-                    } else {
-                        echo "Skipping Keploy results archiving."
-                    }
-                }
+                echo "Archiving Keploy results..."
+                archiveArtifacts artifacts: 'keploy/reports/**', allowEmptyArchive: true
             }
         }
     }
