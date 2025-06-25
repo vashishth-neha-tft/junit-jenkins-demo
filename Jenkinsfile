@@ -2,8 +2,8 @@ pipeline {
     agent any
 
     environment {
-        RUN_JUNIT = false
-        RUN_KEPLOY = false
+        RUN_JUNIT = 'false'
+        RUN_KEPLOY = 'false'
     }
 
     stages {
@@ -15,12 +15,12 @@ pipeline {
                     ]
 
                     if (choice == 'junit') {
-                        env.RUN_JUNIT = 'true'
+                        RUN_JUNIT = 'true'
                     } else if (choice == 'keploy') {
-                        env.RUN_KEPLOY = 'true'
+                        RUN_KEPLOY = 'true'
                     } else if (choice == 'both') {
-                        env.RUN_JUNIT = 'true'
-                        env.RUN_KEPLOY = 'true'
+                        RUN_JUNIT = 'true'
+                        RUN_KEPLOY = 'true'
                     }
                 }
             }
@@ -33,46 +33,62 @@ pipeline {
         }
 
         stage('JUnit Test') {
-            when {
-                expression { env.RUN_JUNIT == 'true' }
-            }
             steps {
-                sh 'mvn test'
+                script {
+                    if (RUN_JUNIT == 'true') {
+                        echo "Running JUnit tests..."
+                        sh 'mvn test'
+                    } else {
+                        echo "Skipping JUnit tests."
+                    }
+                }
             }
         }
 
         stage('Keploy Test') {
-            when {
-                expression { env.RUN_KEPLOY == 'true' }
-            }
             steps {
-              sh '''
-            # Download Keploy CLI (if not already installed)
-            if ! command -v keploy &> /dev/null; then
-              curl -s https://raw.githubusercontent.com/keploy/keploy/main/install.sh | bash
-            fi
+                script {
+                    if (RUN_KEPLOY == 'true') {
+                        echo "Running Keploy tests..."
+                        sh '''
+                        # Download Keploy CLI (if not already installed)
+                        if ! command -v keploy &> /dev/null; then
+                          curl -s https://raw.githubusercontent.com/keploy/keploy/main/install.sh | bash
+                        fi
 
-            # Run keploy tests
-            keploy test -c "java -cp target/classes com.example.StringUtils"
-        '''
-    }
+                        # Run keploy test
+                        keploy test -c "java -cp target/classes com.example.StringUtils"
+                        '''
+                    } else {
+                        echo "Skipping Keploy tests."
+                    }
+                }
+            }
         }
 
         stage('Archive JUnit Results') {
-            when {
-                expression { env.RUN_JUNIT == 'true' }
-            }
             steps {
-                junit 'target/surefire-reports/*.xml'
+                script {
+                    if (RUN_JUNIT == 'true') {
+                        echo "Archiving JUnit results..."
+                        junit 'target/surefire-reports/*.xml'
+                    } else {
+                        echo "Skipping JUnit results archiving."
+                    }
+                }
             }
         }
 
         stage('Archive Keploy Results') {
-            when {
-                expression { env.RUN_KEPLOY == 'true' }
-            }
             steps {
-                archiveArtifacts artifacts: 'keploy/reports/**', allowEmptyArchive: true
+                script {
+                    if (RUN_KEPLOY == 'true') {
+                        echo "Archiving Keploy results..."
+                        archiveArtifacts artifacts: 'keploy/reports/**', allowEmptyArchive: true
+                    } else {
+                        echo "Skipping Keploy results archiving."
+                    }
+                }
             }
         }
     }
