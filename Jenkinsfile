@@ -46,9 +46,16 @@ pipeline {
                 expression { env.RUN_KEPLOY == 'true' }
             }
             steps {
-                // Make sure this command reflects your app setup
-                sh 'keploy test -c "java -cp target/classes com.example.YourMainClass"'
-            }
+              sh '''
+            # Download Keploy CLI (if not already installed)
+            if ! command -v keploy &> /dev/null; then
+              curl -s https://raw.githubusercontent.com/keploy/keploy/main/install.sh | bash
+            fi
+
+            # Run keploy tests
+            keploy test -c "java -cp target/classes com.example.StringUtils"
+        '''
+    }
         }
 
         stage('Archive JUnit Results') {
