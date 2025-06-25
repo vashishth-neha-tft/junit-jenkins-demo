@@ -50,7 +50,7 @@ pipeline {
                     docker run --rm \
                         -v "$(pwd)":/app \
                         -w /app \
-                        keploy/keploy:latest test -c "java -cp target/classes com.example.StringUtils"
+                        keploy/keploy-go test -c "java -cp target/classes com.example.StringUtils"
                 '''
             }
         }
