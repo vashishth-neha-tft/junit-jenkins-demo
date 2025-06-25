@@ -1,10 +1,8 @@
+def runJunit = false
+def runKeploy = false
+
 pipeline {
     agent any
-
-    environment {
-        RUN_JUNIT = 'false'
-        RUN_KEPLOY = 'false'
-    }
 
     stages {
         stage('Select Test Type') {
@@ -15,12 +13,12 @@ pipeline {
                     ]
 
                     if (choice == 'junit') {
-                        env.RUN_JUNIT = 'true'
+                        runJunit = true
                     } else if (choice == 'keploy') {
-                        env.RUN_KEPLOY = 'true'
+                        runKeploy = true
                     } else if (choice == 'both') {
-                        env.RUN_JUNIT = 'true'
-                        env.RUN_KEPLOY = 'true'
+                        runJunit = true
+                        runKeploy = true
                     }
                 }
             }
@@ -34,7 +32,7 @@ pipeline {
 
         stage('JUnit Test') {
             when {
-                expression { env.RUN_JUNIT == 'true' }
+                expression { return runJunit }
             }
             steps {
                 echo "Running JUnit tests..."
@@ -44,7 +42,7 @@ pipeline {
 
         stage('Keploy Test') {
             when {
-                expression { env.RUN_KEPLOY == 'true' }
+                expression { return runKeploy }
             }
             steps {
                 echo "Running Keploy tests with Docker..."
@@ -59,7 +57,7 @@ pipeline {
 
         stage('Archive JUnit Results') {
             when {
-                expression { env.RUN_JUNIT == 'true' }
+                expression { return runJunit }
             }
             steps {
                 echo "Archiving JUnit results..."
@@ -69,7 +67,7 @@ pipeline {
 
         stage('Archive Keploy Results') {
             when {
-                expression { env.RUN_KEPLOY == 'true' }
+                expression { return runKeploy }
             }
             steps {
                 echo "Archiving Keploy results..."
