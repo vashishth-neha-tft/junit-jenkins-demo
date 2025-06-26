@@ -1,43 +1,48 @@
 pipeline {
     agent any
     
+    tools {
+        jdk 'jdk11'  // Make sure this matches your JDK tool name in Jenkins
+        maven 'maven3' 
+    }
+    
     environment {
         SONAR_SERVER = "MySonarQube"
     }
     
     stages {
-        stage('Build & Test') {
+        stage('Build') {
             steps {
-                sh 'mvn clean package'
+                sh 'mvn clean compile'
+            }
+        }
+        
+        stage('Test') {
+            steps {
+                sh 'mvn test'
                 junit 'target/surefire-reports/*.xml'
             }
         }
         
-        // Debug stage to verify variables
-        stage('Pre-Sonar Check') {
+        stage('SonarQube Analysis') {
             steps {
                 script {
-                    echo "SonarQube Server: ${SONAR_SERVER}"
-                    echo "Host URL: ${env.SONAR_HOST_URL}"
-                }
-            }
-        }
-        
-        stage('SonarQube Analysis') {
-            agent any  // Explicit agent
-            steps {
-                echo 'Starting SonarQube Analysis...'
-                withSonarQubeEnv(SONAR_SERVER) {
-                    sh '''
-                        echo "Visible ENV VARS:"
-                        env | sort
-                        
-                        mvn sonar:sonar \
-                        -Dsonar.projectKey=junit-jenkins-demo \
-                        -Dsonar.projectName="JUnit Jenkins Demo" \
-                        -Dsonar.java.binaries=target/classes \
-                        -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
-                    '''
+                    // Verify classes exist before SonarQube
+                    def classesExist = fileExists 'target/classes'
+                    echo "Classes exist: ${classesExist}"
+                    if (!classesExist) {
+                        error "Compiled classes not found in target/classes!"
+                    }
+                    
+                    withSonarQubeEnv(SONAR_SERVER) {
+                        sh '''
+                            mvn sonar:sonar \
+                            -Dsonar.projectKey=junit-jenkins-demo \
+                            -Dsonar.projectName="JUnit Jenkins Demo" \
+                            -Dsonar.java.binaries=target/classes \
+                            -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
+                        '''
+                    }
                 }
             }
         }
