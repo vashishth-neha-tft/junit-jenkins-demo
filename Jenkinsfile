@@ -15,6 +15,7 @@ pipeline {
         }
         stage('SonarQube Analysis') {
             steps {
+                echo '🔍 Starting SonarQube Analysis...'
                 withSonarQubeEnv(SONAR_SERVER) {
                     sh '''
                         mvn sonar:sonar \
