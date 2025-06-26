@@ -18,6 +18,8 @@ pipeline {
                 echo '🔍 Starting SonarQube Analysis...'
                 withSonarQubeEnv(SONAR_SERVER) {
                     sh '''
+                        echo "✅ SONAR TOKEN = $SONAR_AUTH_TOKEN"
+                        echo "✅ SONAR HOST URL = $SONAR_HOST_URL"
                         mvn sonar:sonar \
                         -Dsonar.projectKey=junit-jenkins-demo \
                         -Dsonar.projectName="JUnit Jenkins Demo" \
