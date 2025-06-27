@@ -11,6 +11,28 @@ pipeline {
                 sh 'mvn clean package'
                 junit 'target/surefire-reports/*.xml'
             }
+            post {
+                success {
+                    script {
+                        // Get test result summary
+                        def testResult = junit testResults: 'target/surefire-reports/*.xml', allowEmptyResults: true
+                        def totalTests = testResult.totalCount
+                        def passedTests = testResult.passCount
+                        
+                        // Calculate pass percentage
+                        def passPercentage = (passedTests / totalTests) * 100
+                        
+                        // Set environment variable if pass rate > 50%
+                        if (passPercentage > 50) {
+                            env.RUN_SONARQUBE = 'true'
+                            echo "Test pass rate ${passPercentage}% > 50%, SonarQube will run"
+                        } else {
+                            env.RUN_SONARQUBE = 'false'
+                            echo "Test pass rate ${passPercentage}% <= 50%, SonarQube will NOT run"
+                        }
+                    }
+                }
+            }
         }
 
         stage('Verify target/classes') {
@@ -21,6 +43,9 @@ pipeline {
         }
 
         stage('SonarQube Analysis') {
+            when {
+                environment name: 'RUN_SONARQUBE', value: 'true'
+            }
             steps {
                 echo 'Starting SonarQube Analysis...'
                 withSonarQubeEnv(SONAR_SERVER) {
@@ -36,6 +61,9 @@ pipeline {
         }
 
         stage('Quality Gate') {
+            when {
+                environment name: 'RUN_SONARQUBE', value: 'true'
+            }
             steps {
                 timeout(time: 5, unit: 'MINUTES') {
                     waitForQualityGate abortPipeline: true
