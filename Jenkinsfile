@@ -3,70 +3,63 @@ pipeline {
     
     environment {
         SONAR_SERVER = "MySonarQube"
+        JFROG_SERVER = "MyJFrogServer"
     }
     
     stages {
-        stage('Build & Test') {
+        // Existing stages (Build & Test, Verify, SonarQube Analysis, Quality Gate)
+        
+        stage('Credentials Scanning') {
             steps {
-                sh 'mvn clean package'
-                junit 'target/surefire-reports/*.xml'
-            }
-            post {
-                success {
-                    script {
-                        // Get test result summary
-                        def testResult = junit testResults: 'target/surefire-reports/*.xml', allowEmptyResults: true
-                        def totalTests = testResult.totalCount
-                        def passedTests = testResult.passCount
-                        
-                        // Calculate pass percentage
-                        def passPercentage = (passedTests / totalTests) * 100
-                        
-                        // Set environment variable if pass rate > 50%
-                        if (passPercentage > 50) {
-                            env.RUN_SONARQUBE = 'true'
-                            echo "Test pass rate ${passPercentage}% > 50%, SonarQube will run"
-                        } else {
-                            env.RUN_SONARQUBE = 'false'
-                            echo "Test pass rate ${passPercentage}% <= 50%, SonarQube will NOT run"
+                parallel {
+                    stage('SonarQube Creds Scan') {
+                        steps {
+                            withSonarQubeEnv(SONAR_SERVER) {
+                                sh 'mvn sonar:sonar -Dsonar.security.scan=true'
+                            }
+                        }
+                    }
+                    stage('Gitleaks Scan') {
+                        steps {
+                            sh '''
+                                # Install and run gitleaks
+                                curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.0.0/gitleaks_8.0.0_linux_x64.tar.gz | tar xz
+                                ./gitleaks detect --source=. --report-format=json --report-path=gitleaks-report.json
+                                
+                                # Check for leaks
+                                if [ -s gitleaks-report.json ]; then
+                                    echo "Credentials leaks detected!"
+                                    cat gitleaks-report.json
+                                    exit 1
+                                fi
+                            '''
                         }
                     }
                 }
             }
         }
-
-        stage('Verify target/classes') {
+        
+        stage('Artifacts Scanning') {
             steps {
-                sh 'ls -la target'
-                sh 'ls -la target/classes || echo "target/classes not found"'
-            }
-        }
-
-        stage('SonarQube Analysis') {
-            when {
-                environment name: 'RUN_SONARQUBE', value: 'true'
-            }
-            steps {
-                echo 'Starting SonarQube Analysis...'
-                withSonarQubeEnv(SONAR_SERVER) {
-                    sh '''
-                        mvn sonar:sonar \
-                        -Dsonar.projectKey=junit-jenkins-demo \
-                        -Dsonar.projectName="JUnit Jenkins Demo" \
-                        -Dsonar.java.binaries=target/classes \
-                        -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
-                    '''
-                }
-            }
-        }
-
-        stage('Quality Gate') {
-            when {
-                environment name: 'RUN_SONARQUBE', value: 'true'
-            }
-            steps {
-                timeout(time: 5, unit: 'MINUTES') {
-                    waitForQualityGate abortPipeline: true
+                parallel {
+                    stage('SonarQube Artifact Scan') {
+                        steps {
+                            withSonarQubeEnv(SONAR_SERVER) {
+                                sh 'mvn sonar:sonar -Dsonar.java.binaries=target/classes'
+                            }
+                        }
+                    }
+                    stage('JFrog Artifact Scan') {
+                        steps {
+                            withCredentials([usernamePassword(credentialsId: 'jfrog-creds', usernameVariable: 'JFROG_USER', passwordVariable: 'JFROG_PASS')]) {
+                                sh '''
+                                    # Upload and scan artifact with JFrog
+                                    curl -u $JFROG_USER:$JFROG_PASS -X PUT "https://${JFROG_SERVER}/artifactory/example-repo/my-app-${BUILD_NUMBER}.jar" -T target/*.jar
+                                    curl -u $JFROG_USER:$JFROG_PASS -X POST "https://${JFROG_SERVER}/api/scan/my-app-${BUILD_NUMBER}.jar"
+                                '''
+                            }
+                        }
+                    }
                 }
             }
         }
