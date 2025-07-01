@@ -3,25 +3,24 @@ pipeline {
 
     environment {
         SONAR_SERVER = "MySonarQube"
-        // Add Keploy binary directory to PATH if needed
         PATH = "/usr/local/bin:$PATH"
     }
 
     stages {
-        // Your existing Build & Test, SonarQube, etc.
-
-        stage('Credentials Scanning') {
+        stage('Build & Unit Test') {
             steps {
-                withSonarQubeEnv(SONAR_SERVER) {
-                    sh 'mvn sonar:sonar -Dsonar.security.scan=true'
-                }
+                sh 'mvn clean verify -DskipTests=false'
             }
         }
 
-        stage('SonarQube Artifact Scan') {
+        stage('SonarQube Scan') {
             steps {
                 withSonarQubeEnv(SONAR_SERVER) {
-                    sh 'mvn sonar:sonar -Dsonar.java.binaries=target/classes'
+                    sh '''
+                        mvn sonar:sonar \
+                        -Dsonar.projectKey=junit-jenkins-demo \
+                        -Dsonar.java.binaries=target/classes
+                    '''
                 }
             }
         }
@@ -33,7 +32,6 @@ pipeline {
                     chmod +x install.sh
                     bash install.sh
 
-                    # Move to PATH if not automatically done
                     sudo mv keploy /usr/local/bin/keploy || true
                     sudo chmod +x /usr/local/bin/keploy
                 '''
@@ -43,8 +41,6 @@ pipeline {
         stage('Run Keploy Tests') {
             steps {
                 sh '''
-                    # Assuming your app can be run like this
-                    # Modify the command according to your app entry point
                     sudo -E keploy test -c "mvn spring-boot:run" --delay 5 --disableANSI
                 '''
             }
