@@ -7,6 +7,7 @@ pipeline {
     }
 
     stages {
+
         stage('Build & Unit Test') {
             steps {
                 echo 'Running Maven build and unit tests...'
@@ -65,14 +66,20 @@ pipeline {
 
         stage('Install & Run Snyk') {
             environment {
-                SNYK_TOKEN = credentials('SNYK_TOKEN') // Inject securely
+                SNYK_TOKEN = credentials('SNYK_TOKEN') // Add this as a secret text credential in Jenkins
             }
             steps {
                 echo 'Installing and running Snyk for vulnerability scanning...'
                 sh '''
-                    curl -sL https://snyk.io/install | bash
-                    export PATH=$HOME/.snyk:$PATH
+                    # Download Snyk binary
+                    curl -Lo snyk https://static.snyk.io/cli/latest/snyk-linux
+                    chmod +x snyk
+                    sudo mv snyk /usr/local/bin/snyk || true
+
+                    # Authenticate with Snyk
                     snyk auth ${SNYK_TOKEN}
+
+                    # Run Snyk test
                     snyk test || echo "Snyk found vulnerabilities"
                 '''
             }
