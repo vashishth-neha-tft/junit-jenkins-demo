@@ -1,14 +1,15 @@
 pipeline {
     agent any
-    
+
     environment {
         SONAR_SERVER = "MySonarQube"
-        JFROG_SERVER = "MyJFrogServer"
+        // Add Keploy binary directory to PATH if needed
+        PATH = "/usr/local/bin:$PATH"
     }
-    
+
     stages {
-        // Your existing stages (Build & Test, Verify, SonarQube Analysis, Quality Gate) here
-        
+        // Your existing Build & Test, SonarQube, etc.
+
         stage('Credentials Scanning') {
             parallel {
                 stage('SonarQube Creds Scan') {
@@ -21,11 +22,9 @@ pipeline {
                 stage('Gitleaks Scan') {
                     steps {
                         sh '''
-                            # Install and run gitleaks
                             curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.0.0/gitleaks_8.0.0_linux_x64.tar.gz | tar xz
                             ./gitleaks detect --source=. --report-format=json --report-path=gitleaks-report.json
-                            
-                            # Check for leaks
+
                             if [ -s gitleaks-report.json ]; then
                                 echo "Credentials leaks detected!"
                                 cat gitleaks-report.json
@@ -36,27 +35,36 @@ pipeline {
                 }
             }
         }
-        
-        stage('Artifacts Scanning') {
-            parallel {
-                stage('SonarQube Artifact Scan') {
-                    steps {
-                        withSonarQubeEnv(SONAR_SERVER) {
-                            sh 'mvn sonar:sonar -Dsonar.java.binaries=target/classes'
-                        }
-                    }
+
+        stage('SonarQube Artifact Scan') {
+            steps {
+                withSonarQubeEnv(SONAR_SERVER) {
+                    sh 'mvn sonar:sonar -Dsonar.java.binaries=target/classes'
                 }
-                stage('JFrog Artifact Scan') {
-                    steps {
-                        withCredentials([usernamePassword(credentialsId: 'jfrog-creds', usernameVariable: 'JFROG_USER', passwordVariable: 'JFROG_PASS')]) {
-                            sh '''
-                                # Upload and scan artifact with JFrog
-                                curl -u $JFROG_USER:$JFROG_PASS -X PUT "https://${JFROG_SERVER}/artifactory/example-repo/my-app-${BUILD_NUMBER}.jar" -T target/*.jar
-                                curl -u $JFROG_USER:$JFROG_PASS -X POST "https://${JFROG_SERVER}/api/scan/my-app-${BUILD_NUMBER}.jar"
-                            '''
-                        }
-                    }
-                }
+            }
+        }
+
+        stage('Install Keploy') {
+            steps {
+                sh '''
+                    curl --silent -O -L https://keploy.io/install.sh
+                    chmod +x install.sh
+                    bash install.sh
+
+                    # Move to PATH if not automatically done
+                    sudo mv keploy /usr/local/bin/keploy || true
+                    sudo chmod +x /usr/local/bin/keploy
+                '''
+            }
+        }
+
+        stage('Run Keploy Tests') {
+            steps {
+                sh '''
+                    # Assuming your app can be run like this
+                    # Modify the command according to your app entry point
+                    sudo -E keploy test -c "mvn spring-boot:run" --delay 5 --disableANSI
+                '''
             }
         }
     }
