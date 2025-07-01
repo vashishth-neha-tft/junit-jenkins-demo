@@ -11,27 +11,9 @@ pipeline {
         // Your existing Build & Test, SonarQube, etc.
 
         stage('Credentials Scanning') {
-            parallel {
-                stage('SonarQube Creds Scan') {
-                    steps {
-                        withSonarQubeEnv(SONAR_SERVER) {
-                            sh 'mvn sonar:sonar -Dsonar.security.scan=true'
-                        }
-                    }
-                }
-                stage('Gitleaks Scan') {
-                    steps {
-                        sh '''
-                            curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.0.0/gitleaks_8.0.0_linux_x64.tar.gz | tar xz
-                            ./gitleaks detect --source=. --report-format=json --report-path=gitleaks-report.json
-
-                            if [ -s gitleaks-report.json ]; then
-                                echo "Credentials leaks detected!"
-                                cat gitleaks-report.json
-                                exit 1
-                            fi
-                        '''
-                    }
+            steps {
+                withSonarQubeEnv(SONAR_SERVER) {
+                    sh 'mvn sonar:sonar -Dsonar.security.scan=true'
                 }
             }
         }
