@@ -7,9 +7,18 @@ pipeline {
     }
 
     stages {
+
         stage('Build & Unit Test') {
             steps {
                 sh 'mvn clean verify -DskipTests=false'
+                junit 'target/surefire-reports/*.xml'
+            }
+        }
+
+        stage('Verify target/classes') {
+            steps {
+                sh 'ls -la target'
+                sh 'ls -la target/classes || echo "target/classes not found"'
             }
         }
 
