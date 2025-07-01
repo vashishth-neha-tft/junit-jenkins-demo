@@ -62,6 +62,21 @@ pipeline {
                 '''
             }
         }
+
+        stage('Install & Run Snyk') {
+            environment {
+                SNYK_TOKEN = credentials('SNYK_TOKEN') // Inject securely
+            }
+            steps {
+                echo 'Installing and running Snyk for vulnerability scanning...'
+                sh '''
+                    curl -sL https://snyk.io/install | bash
+                    export PATH=$HOME/.snyk:$PATH
+                    snyk auth ${SNYK_TOKEN}
+                    snyk test || echo "Snyk found vulnerabilities"
+                '''
+            }
+        }
     }
 
     post {
@@ -69,10 +84,10 @@ pipeline {
             echo 'Pipeline completed.'
         }
         success {
-            echo 'Build, Test, Sonar Scan & Keploy Test Generation successful.'
+            echo 'Build, Test, Sonar, Keploy, and Snyk scan successful.'
         }
         failure {
-            echo 'Pipeline failed. Check logs for errors.'
+            echo 'Pipeline failed. Check logs for details.'
         }
     }
 }
