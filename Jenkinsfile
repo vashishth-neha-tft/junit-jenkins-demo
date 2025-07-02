@@ -2,14 +2,10 @@ pipeline {
     agent any
 
     parameters {
-        extendedChoice(
+        string(
             name: 'TOOLS_TO_RUN',
-            type: 'PT_CHECKBOX',
-            description: 'Select tools to run:',
-            multiSelectDelimiter: ',',
-            value: 'junit,sonarqube,keploy,snyk',
             defaultValue: 'junit,sonarqube',
-            quoteValue: false
+            description: 'Comma-separated tools to run: junit,sonarqube,keploy,snyk'
         )
     }
 
@@ -22,7 +18,7 @@ pipeline {
 
         stage('Build & Unit Test') {
             when {
-                expression { params.TOOLS_TO_RUN.contains('junit') }
+                expression { params.TOOLS_TO_RUN.toLowerCase().contains('junit') }
             }
             steps {
                 echo 'Running Maven build and unit tests...'
@@ -33,7 +29,7 @@ pipeline {
 
         stage('Verify target/classes') {
             when {
-                expression { params.TOOLS_TO_RUN.contains('junit') }
+                expression { params.TOOLS_TO_RUN.toLowerCase().contains('junit') }
             }
             steps {
                 echo 'Checking compiled classes...'
@@ -44,11 +40,11 @@ pipeline {
 
         stage('SonarQube Scan') {
             when {
-                expression { params.TOOLS_TO_RUN.contains('sonarqube') }
+                expression { params.TOOLS_TO_RUN.toLowerCase().contains('sonarqube') }
             }
             steps {
                 echo 'Running SonarQube scan...'
-                withSonarQubeEnv(SONAR_SERVER) {
+                withSonarQubeEnv("${SONAR_SERVER}") {
                     sh '''
                         mvn sonar:sonar \
                         -Dsonar.projectKey=junit-jenkins-demo \
@@ -65,7 +61,7 @@ pipeline {
 
         stage('Install Keploy') {
             when {
-                expression { params.TOOLS_TO_RUN.contains('keploy') }
+                expression { params.TOOLS_TO_RUN.toLowerCase().contains('keploy') }
             }
             steps {
                 echo 'Installing Keploy...'
@@ -81,7 +77,7 @@ pipeline {
 
         stage('Run Keploy Tests') {
             when {
-                expression { params.TOOLS_TO_RUN.contains('keploy') }
+                expression { params.TOOLS_TO_RUN.toLowerCase().contains('keploy') }
             }
             steps {
                 echo 'Running Keploy to generate tests...'
@@ -93,10 +89,10 @@ pipeline {
 
         stage('Install & Run Snyk') {
             when {
-                expression { params.TOOLS_TO_RUN.contains('snyk') }
+                expression { params.TOOLS_TO_RUN.toLowerCase().contains('snyk') }
             }
             environment {
-                SNYK_TOKEN = credentials('SNYK_TOKEN') // Add this as a secret text credential in Jenkins
+                SNYK_TOKEN = credentials('SNYK_TOKEN') // Add this secret in Jenkins
             }
             steps {
                 echo 'Installing and running Snyk for vulnerability scanning...'
