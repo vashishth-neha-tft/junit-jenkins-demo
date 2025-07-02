@@ -2,7 +2,15 @@ pipeline {
     agent any
 
     parameters {
-        string(name: 'TOOLS_TO_RUN', defaultValue: 'junit,sonarqube', description: 'Comma-separated tools: junit,sonarqube,keploy,snyk')
+        extendedChoice(
+            name: 'TOOLS_TO_RUN',
+            type: 'PT_CHECKBOX',
+            description: 'Select tools to run:',
+            multiSelectDelimiter: ',',
+            value: 'junit,sonarqube,keploy,snyk',
+            defaultValue: 'junit,sonarqube',
+            quoteValue: false
+        )
     }
 
     environment {
