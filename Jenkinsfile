@@ -1,14 +1,26 @@
 pipeline {
     agent any
 
+    parameters {
+        string(
+            name: 'TOOLS_TO_RUN',
+            defaultValue: 'junit,sonarqube,keploy,snyk',
+            description: 'Comma-separated list of tools to run (e.g., junit,sonarqube,keploy,snyk)'
+        )
+    }
+
     environment {
         SONAR_SERVER = "MySonarQube"
         PATH = "/usr/local/bin:$PATH"
+        TOOLS = "${params.TOOLS_TO_RUN}"
     }
 
     stages {
 
         stage('Build & Unit Test') {
+            when {
+                expression { return TOOLS.contains('junit') }
+            }
             steps {
                 echo 'Running Maven build and unit tests...'
                 sh 'mvn clean verify -DskipTests=false'
@@ -17,6 +29,9 @@ pipeline {
         }
 
         stage('Verify target/classes') {
+            when {
+                expression { return TOOLS.contains('sonarqube') || TOOLS.contains('keploy') }
+            }
             steps {
                 echo 'Checking compiled classes...'
                 sh 'ls -la target'
@@ -25,6 +40,9 @@ pipeline {
         }
 
         stage('SonarQube Scan') {
+            when {
+                expression { return TOOLS.contains('sonarqube') }
+            }
             steps {
                 echo 'Running SonarQube scan...'
                 withSonarQubeEnv(SONAR_SERVER) {
@@ -43,6 +61,9 @@ pipeline {
         }
 
         stage('Install Keploy') {
+            when {
+                expression { return TOOLS.contains('keploy') }
+            }
             steps {
                 echo 'Installing Keploy...'
                 sh '''
@@ -56,6 +77,9 @@ pipeline {
         }
 
         stage('Run Keploy Tests') {
+            when {
+                expression { return TOOLS.contains('keploy') }
+            }
             steps {
                 echo 'Running Keploy to generate tests...'
                 sh '''
@@ -65,21 +89,19 @@ pipeline {
         }
 
         stage('Install & Run Snyk') {
+            when {
+                expression { return TOOLS.contains('snyk') }
+            }
             environment {
-                SNYK_TOKEN = credentials('SNYK_TOKEN') // Add this as a secret text credential in Jenkins
+                SNYK_TOKEN = credentials('SNYK_TOKEN')
             }
             steps {
                 echo 'Installing and running Snyk for vulnerability scanning...'
                 sh '''
-                    # Download Snyk binary
                     curl -Lo snyk https://static.snyk.io/cli/latest/snyk-linux
                     chmod +x snyk
                     sudo mv snyk /usr/local/bin/snyk || true
-
-                    # Authenticate with Snyk
                     snyk auth ${SNYK_TOKEN}
-
-                    # Run Snyk test
                     snyk test || echo "Snyk found vulnerabilities"
                 '''
             }
@@ -91,7 +113,7 @@ pipeline {
             echo 'Pipeline completed.'
         }
         success {
-            echo 'Build, Test, Sonar, Keploy, and Snyk scan successful.'
+            echo 'Selected tools completed successfully.'
         }
         failure {
             echo 'Pipeline failed. Check logs for details.'
