@@ -2,10 +2,16 @@ pipeline {
     agent any
 
     parameters {
-        string(
-            name: 'TOOLS_TO_RUN',
-            defaultValue: 'junit,sonarqube',
-            description: 'Comma-separated tools to run: junit,sonarqube,keploy,snyk'
+        choice(
+            name: 'TEST_TOOLS',
+            choices: ['none', 'junit', 'keploy', 'junit,keploy'],
+            description: 'Select test tools to run (choose junit, keploy, or both)'
+        )
+
+        choice(
+            name: 'ANALYSIS_TOOLS',
+            choices: ['none', 'sonarqube', 'snyk', 'sonarqube,snyk'],
+            description: 'Select analysis tools to run (choose sonarqube, snyk, or both)'
         )
     }
 
@@ -18,7 +24,7 @@ pipeline {
 
         stage('Build & Unit Test') {
             when {
-                expression { params.TOOLS_TO_RUN.toLowerCase().contains('junit') }
+                expression { params.TEST_TOOLS.toLowerCase().contains('junit') }
             }
             steps {
                 echo 'Running Maven build and unit tests...'
@@ -29,7 +35,7 @@ pipeline {
 
         stage('Verify target/classes') {
             when {
-                expression { params.TOOLS_TO_RUN.toLowerCase().contains('junit') }
+                expression { params.TEST_TOOLS.toLowerCase().contains('junit') }
             }
             steps {
                 echo 'Checking compiled classes...'
@@ -38,9 +44,37 @@ pipeline {
             }
         }
 
+        stage('Install Keploy') {
+            when {
+                expression { params.TEST_TOOLS.toLowerCase().contains('keploy') }
+            }
+            steps {
+                echo 'Installing Keploy...'
+                sh '''
+                    curl --silent -O -L https://keploy.io/install.sh
+                    chmod +x install.sh
+                    bash install.sh
+                    sudo mv keploy /usr/local/bin/keploy || true
+                    sudo chmod +x /usr/local/bin/keploy
+                '''
+            }
+        }
+
+        stage('Run Keploy Tests') {
+            when {
+                expression { params.TEST_TOOLS.toLowerCase().contains('keploy') }
+            }
+            steps {
+                echo 'Running Keploy to generate tests...'
+                sh '''
+                    sudo -E keploy test -c "mvn spring-boot:run" --delay 5 --disableANSI
+                '''
+            }
+        }
+
         stage('SonarQube Scan') {
             when {
-                expression { params.TOOLS_TO_RUN.toLowerCase().contains('sonarqube') }
+                expression { params.ANALYSIS_TOOLS.toLowerCase().contains('sonarqube') }
             }
             steps {
                 echo 'Running SonarQube scan...'
@@ -59,40 +93,12 @@ pipeline {
             }
         }
 
-        stage('Install Keploy') {
-            when {
-                expression { params.TOOLS_TO_RUN.toLowerCase().contains('keploy') }
-            }
-            steps {
-                echo 'Installing Keploy...'
-                sh '''
-                    curl --silent -O -L https://keploy.io/install.sh
-                    chmod +x install.sh
-                    bash install.sh
-                    sudo mv keploy /usr/local/bin/keploy || true
-                    sudo chmod +x /usr/local/bin/keploy
-                '''
-            }
-        }
-
-        stage('Run Keploy Tests') {
-            when {
-                expression { params.TOOLS_TO_RUN.toLowerCase().contains('keploy') }
-            }
-            steps {
-                echo 'Running Keploy to generate tests...'
-                sh '''
-                    sudo -E keploy test -c "mvn spring-boot:run" --delay 5 --disableANSI
-                '''
-            }
-        }
-
         stage('Install & Run Snyk') {
             when {
-                expression { params.TOOLS_TO_RUN.toLowerCase().contains('snyk') }
+                expression { params.ANALYSIS_TOOLS.toLowerCase().contains('snyk') }
             }
             environment {
-                SNYK_TOKEN = credentials('SNYK_TOKEN') // Add this secret in Jenkins
+                SNYK_TOKEN = credentials('SNYK_TOKEN')
             }
             steps {
                 echo 'Installing and running Snyk for vulnerability scanning...'
@@ -112,7 +118,7 @@ pipeline {
             echo 'Pipeline completed.'
         }
         success {
-            echo "Build completed with selected tools: ${params.TOOLS_TO_RUN}"
+            echo "Build completed with selected test tools: ${params.TEST_TOOLS}, analysis tools: ${params.ANALYSIS_TOOLS}"
         }
         failure {
             echo 'Pipeline failed. Check logs for details.'
