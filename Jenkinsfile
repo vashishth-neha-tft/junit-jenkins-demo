@@ -1,20 +1,6 @@
 pipeline {
     agent any
 
-    parameters {
-        choice(
-            name: 'TEST_TOOLS',
-            choices: ['none', 'junit', 'keploy', 'junit,keploy'],
-            description: 'Select test tools to run (choose junit, keploy, or both)'
-        )
-
-        choice(
-            name: 'ANALYSIS_TOOLS',
-            choices: ['none', 'sonarqube', 'snyk', 'sonarqube,snyk'],
-            description: 'Select analysis tools to run (choose sonarqube, snyk, or both)'
-        )
-    }
-
     environment {
         SONAR_SERVER = "MySonarQube"
         PATH = "/usr/local/bin:$PATH"
@@ -22,9 +8,39 @@ pipeline {
 
     stages {
 
+        stage('Select Test Tools') {
+            steps {
+                script {
+                    def testChoice = input(
+                        id: 'testChoice',
+                        message: 'Select testing tools to run',
+                        parameters: [
+                            choice(name: 'TestTools', choices: ['none', 'junit', 'keploy', 'both'], description: 'Choose test tools')
+                        ]
+                    )
+                    env.TEST_TOOLS = testChoice
+                }
+            }
+        }
+
+        stage('Select Analysis Tools') {
+            steps {
+                script {
+                    def analysisChoice = input(
+                        id: 'analysisChoice',
+                        message: 'Select analysis tools to run',
+                        parameters: [
+                            choice(name: 'AnalysisTools', choices: ['none', 'sonarqube', 'snyk', 'both'], description: 'Choose analysis tools')
+                        ]
+                    )
+                    env.ANALYSIS_TOOLS = analysisChoice
+                }
+            }
+        }
+
         stage('Build & Unit Test') {
             when {
-                expression { params.TEST_TOOLS.toLowerCase().contains('junit') }
+                expression { env.TEST_TOOLS == 'junit' || env.TEST_TOOLS == 'both' }
             }
             steps {
                 echo 'Running Maven build and unit tests...'
@@ -35,7 +51,7 @@ pipeline {
 
         stage('Verify target/classes') {
             when {
-                expression { params.TEST_TOOLS.toLowerCase().contains('junit') }
+                expression { env.TEST_TOOLS == 'junit' || env.TEST_TOOLS == 'both' }
             }
             steps {
                 echo 'Checking compiled classes...'
@@ -46,7 +62,7 @@ pipeline {
 
         stage('Install Keploy') {
             when {
-                expression { params.TEST_TOOLS.toLowerCase().contains('keploy') }
+                expression { env.TEST_TOOLS == 'keploy' || env.TEST_TOOLS == 'both' }
             }
             steps {
                 echo 'Installing Keploy...'
@@ -62,19 +78,17 @@ pipeline {
 
         stage('Run Keploy Tests') {
             when {
-                expression { params.TEST_TOOLS.toLowerCase().contains('keploy') }
+                expression { env.TEST_TOOLS == 'keploy' || env.TEST_TOOLS == 'both' }
             }
             steps {
                 echo 'Running Keploy to generate tests...'
-                sh '''
-                    sudo -E keploy test -c "mvn spring-boot:run" --delay 5 --disableANSI
-                '''
+                sh 'sudo -E keploy test -c "mvn spring-boot:run" --delay 5 --disableANSI'
             }
         }
 
         stage('SonarQube Scan') {
             when {
-                expression { params.ANALYSIS_TOOLS.toLowerCase().contains('sonarqube') }
+                expression { env.ANALYSIS_TOOLS == 'sonarqube' || env.ANALYSIS_TOOLS == 'both' }
             }
             steps {
                 echo 'Running SonarQube scan...'
@@ -95,7 +109,7 @@ pipeline {
 
         stage('Install & Run Snyk') {
             when {
-                expression { params.ANALYSIS_TOOLS.toLowerCase().contains('snyk') }
+                expression { env.ANALYSIS_TOOLS == 'snyk' || env.ANALYSIS_TOOLS == 'both' }
             }
             environment {
                 SNYK_TOKEN = credentials('SNYK_TOKEN')
@@ -118,7 +132,7 @@ pipeline {
             echo 'Pipeline completed.'
         }
         success {
-            echo "Build completed with selected test tools: ${params.TEST_TOOLS}, analysis tools: ${params.ANALYSIS_TOOLS}"
+            echo "Build completed with selected test tools: ${env.TEST_TOOLS}, analysis tools: ${env.ANALYSIS_TOOLS}"
         }
         failure {
             echo 'Pipeline failed. Check logs for details.'
