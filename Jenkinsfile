@@ -30,7 +30,7 @@ pipeline {
                         id: 'analysisChoice',
                         message: 'Select analysis tools to run',
                         parameters: [
-                            choice(name: 'AnalysisTools', choices: ['none', 'sonarqube', 'snyk', 'both'], description: 'Choose analysis tools')
+                            choice(name: 'AnalysisTools', choices: ['none', 'sonarqube', 'jfrog', 'both'], description: 'Choose analysis tools')
                         ]
                     )
                     env.ANALYSIS_TOOLS = analysisChoice
@@ -107,22 +107,26 @@ pipeline {
             }
         }
 
-        stage('Install & Run Snyk') {
+        stage('Upload to JFrog Artifactory') {
             when {
-                expression { env.ANALYSIS_TOOLS == 'snyk' || env.ANALYSIS_TOOLS == 'both' }
-            }
-            environment {
-                SNYK_TOKEN = credentials('SNYK_TOKEN')
+                expression { env.ANALYSIS_TOOLS == 'jfrog' || env.ANALYSIS_TOOLS == 'both' }
             }
             steps {
-                echo 'Installing and running Snyk for vulnerability scanning...'
-                sh '''
-                    curl -Lo snyk https://static.snyk.io/cli/latest/snyk-linux
-                    chmod +x snyk
-                    sudo mv snyk /usr/local/bin/snyk || true
-                    snyk auth ${SNYK_TOKEN}
-                    snyk test || echo "Snyk found vulnerabilities"
-                '''
+                echo 'Uploading artifact to JFrog Artifactory...'
+                script {
+                    def server = Artifactory.server 'my-artifactory' // Ensure this matches your Jenkins config
+                    def buildInfo = Artifactory.newBuildInfo()
+
+                    def uploadSpec = """{
+                        "files": [{
+                            "pattern": "target/*.jar",
+                            "target": "libs-release-local/myapp/"
+                        }]
+                    }"""
+
+                    server.upload spec: uploadSpec, buildInfo: buildInfo
+                    server.publishBuildInfo buildInfo
+                }
             }
         }
     }
