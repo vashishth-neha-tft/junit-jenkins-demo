@@ -15,7 +15,7 @@ pipeline {
                         id: 'testChoice',
                         message: 'Select testing tools to run',
                         parameters: [
-                            choice(name: 'TestTools', choices: ['none', 'junit', 'keploy', 'both'], description: 'Choose test tools')
+                            choice(name: 'TEST_TOOLS', choices: ['none', 'junit', 'keploy', 'both'], description: 'Choose test tools')
                         ]
                     )
                     env.TEST_TOOLS = testChoice
@@ -30,7 +30,7 @@ pipeline {
                         id: 'analysisChoice',
                         message: 'Select analysis tools to run',
                         parameters: [
-                            choice(name: 'AnalysisTools', choices: ['none', 'sonarqube', 'jfrog', 'both'], description: 'Choose analysis tools')
+                            choice(name: 'ANALYSIS_TOOLS', choices: ['none', 'sonarqube', 'jfrog', 'both'], description: 'Choose analysis tools')
                         ]
                     )
                     env.ANALYSIS_TOOLS = analysisChoice
@@ -114,13 +114,13 @@ pipeline {
             steps {
                 echo 'Uploading artifact to JFrog Artifactory...'
                 script {
-                    def server = Artifactory.server 'my-artifactory' // Ensure this matches your Jenkins config
+                    def server = Artifactory.server 'my-artifactory' // Your Jenkins server ID
                     def buildInfo = Artifactory.newBuildInfo()
 
                     def uploadSpec = """{
                         "files": [{
                             "pattern": "target/*.jar",
-                            "target": "libs-release-local/myapp/"
+                            "target": "libs-release-local/"
                         }]
                     }"""
 
