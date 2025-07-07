@@ -30,7 +30,7 @@ pipeline {
                         id: 'analysisChoice',
                         message: 'Select analysis tools to run',
                         parameters: [
-                            choice(name: 'ANALYSIS_TOOLS', choices: ['none', 'sonarqube', 'sybk', 'both'], description: 'Choose analysis tools')
+                            choice(name: 'ANALYSIS_TOOLS', choices: ['none', 'sonarqube', 'synk', 'both'], description: 'Choose analysis tools')
                         ]
                     )
                     env.ANALYSIS_TOOLS = analysisChoice
@@ -122,14 +122,14 @@ pipeline {
             }
         }
 
-        stage('SYBK Analysis (Placeholder)') {
+        stage('SYNK Analysis (Placeholder)') {
             when {
-                expression { env.ANALYSIS_TOOLS == 'sybk' || env.ANALYSIS_TOOLS == 'both' }
+                expression { env.ANALYSIS_TOOLS == 'synk' || env.ANALYSIS_TOOLS == 'both' }
             }
             steps {
-                echo 'Running SYBK analysis...'
+                echo 'Running SYNK analysis...'
                 // Replace this with actual SYBK command
-                sh 'echo "SYBK analysis tool executed (placeholder)"'
+                sh 'echo "SYNK analysis tool executed (placeholder)"'
             }
         }
 
