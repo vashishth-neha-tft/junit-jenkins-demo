@@ -8,8 +8,7 @@ pipeline {
     }
 
     stages {
-
-        stage('Select Test Tools') {
+        stage('Select Tools') {
             steps {
                 script {
                     def testChoice = input(
@@ -20,13 +19,7 @@ pipeline {
                         ]
                     )
                     env.TEST_TOOLS = testChoice
-                }
-            }
-        }
 
-        stage('Select Analysis Tools') {
-            steps {
-                script {
                     def analysisChoice = input(
                         id: 'analysisChoice',
                         message: 'Select analysis tools to run',
@@ -36,6 +29,25 @@ pipeline {
                     )
                     env.ANALYSIS_TOOLS = analysisChoice
                 }
+            }
+        }
+
+        stage('GitLeaks Scan') {
+            steps {
+                echo 'Running GitLeaks secret scanning...'
+                sh '''
+                    # Install GitLeaks if not present
+                    if ! command -v gitleaks &> /dev/null; then
+                        curl -sSfL https://raw.githubusercontent.com/gitleaks/gitleaks/master/install.sh | sh
+                        sudo mv bin/gitleaks /usr/local/bin/
+                    fi
+                    
+                    # Run scan
+                    gitleaks detect --source=. --report-path=gitleaks-report.json || true
+                    
+                    # Archive report
+                    archiveArtifacts artifacts: 'gitleaks-report.json', allowEmptyArchive: true
+                '''
             }
         }
 
@@ -116,17 +128,16 @@ pipeline {
                 echo 'Uploading artifact to JFrog Artifactory...'
                 script {
                     def server = Artifactory.server(env.ARTIFACTORY_SERVER_ID)
-                    def buildInfo = Artifactory.newBuildInfo()
-
                     def uploadSpec = """{
                         "files": [{
                             "pattern": "target/*.jar",
-                            "target": "libs-release-local/test-upload/"
+                            "target": "libs-release-local/test-upload/",
+                            "props": "build.number=${BUILD_NUMBER}"
                         }]
                     }"""
-
-                    server.upload spec: uploadSpec, buildInfo: buildInfo
-                    server.publishBuildInfo buildInfo
+                    
+                    def buildInfo = server.upload(uploadSpec)
+                    server.publishBuildInfo(buildInfo)
                 }
             }
         }
@@ -135,6 +146,15 @@ pipeline {
     post {
         always {
             echo 'Pipeline completed.'
+            script {
+                // Check GitLeaks report if exists
+                if (fileExists('gitleaks-report.json')) {
+                    def leaks = readJSON file: 'gitleaks-report.json'
+                    if (leaks.find { it }) {
+                        unstable 'GitLeaks found potential secrets in the codebase'
+                    }
+                }
+            }
         }
         success {
             echo "Build completed with selected test tools: ${env.TEST_TOOLS}, analysis tools: ${env.ANALYSIS_TOOLS}"
