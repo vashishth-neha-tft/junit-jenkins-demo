@@ -4,215 +4,154 @@ pipeline {
     environment {
         SONAR_SERVER = "MySonarQube"
         PATH = "/usr/local/bin:$PATH"
-        ARTIFACTORY_SERVER_ID = "my-artifactory"
     }
 
     stages {
-        stage('Tool Selection') {
+
+        stage('Select Test Tools') {
             steps {
                 script {
-                    // Test framework selection
-                    env.TEST_TOOLS = input(
-                        id: 'testFramework',
-                        message: 'Select test framework',
+                    def testChoice = input(
+                        id: 'testChoice',
+                        message: 'Select testing tools to run',
                         parameters: [
-                            choice(name: 'TEST_FRAMEWORK', 
-                                  choices: ['none', 'junit', 'keploy'], 
-                                  description: 'Choose testing framework')
+                            choice(name: 'TEST_TOOLS', choices: ['none', 'junit', 'keploy', 'both'], description: 'Choose test tools')
                         ]
                     )
-
-                    // Security scanner selection
-                    env.SECURITY_TOOL = input(
-                        id: 'securityTool',
-                        message: 'Select security scanner',
-                        parameters: [
-                            choice(name: 'SECURITY_SCANNER', 
-                                  choices: ['none', 'gitleaks', 'snyk'], 
-                                  description: 'Choose security scanning tool')
-                        ]
-                    )
-
-                    // Analysis platform selection
-                    env.ANALYSIS_TOOL = input(
-                        id: 'analysisTool',
-                        message: 'Select analysis platform',
-                        parameters: [
-                            choice(name: 'ANALYSIS_PLATFORM', 
-                                  choices: ['none', 'sonarqube', 'jfrog'], 
-                                  description: 'Choose analysis platform')
-                        ]
-                    )
+                    env.TEST_TOOLS = testChoice
                 }
             }
         }
 
-        /* Test Framework Stages */
-        stage('JUnit Tests') {
-            when {
-                expression { env.TEST_TOOLS == 'junit' }
-            }
+        stage('Select Analysis Tools') {
             steps {
-                echo 'Running Maven build and JUnit tests...'
-                sh 'mvn clean verify -DskipTests=false'
-                junit 'target/surefire-reports/*.xml'
-                archiveArtifacts artifacts: 'target/surefire-reports/*.xml', allowEmptyArchive: true
+                script {
+                    def analysisChoice = input(
+                        id: 'analysisChoice',
+                        message: 'Select analysis tools to run',
+                        parameters: [
+                            choice(name: 'ANALYSIS_TOOLS', choices: ['none', 'sonarqube', 'sybk', 'both'], description: 'Choose analysis tools')
+                        ]
+                    )
+                    env.ANALYSIS_TOOLS = analysisChoice
+                }
             }
         }
 
-        stage('Keploy Setup') {
+        stage('Select JFrog Upload Option') {
+            steps {
+                script {
+                    def jfrogChoice = input(
+                        id: 'jfrogChoice',
+                        message: 'Do you want to upload artifact to JFrog?',
+                        parameters: [
+                            choice(name: 'JFROG_UPLOAD', choices: ['no', 'yes'], description: 'Upload to JFrog Artifactory?')
+                        ]
+                    )
+                    env.JFROG_UPLOAD = jfrogChoice
+                }
+            }
+        }
+
+        stage('Build & Unit Test') {
             when {
-                expression { env.TEST_TOOLS == 'keploy' }
+                expression { env.TEST_TOOLS == 'junit' || env.TEST_TOOLS == 'both' }
+            }
+            steps {
+                echo 'Running Maven build and unit tests...'
+                sh 'mvn clean verify -DskipTests=false'
+                junit 'target/surefire-reports/*.xml'
+            }
+        }
+
+        stage('Verify target/classes') {
+            when {
+                expression { env.TEST_TOOLS == 'junit' || env.TEST_TOOLS == 'both' }
+            }
+            steps {
+                echo 'Checking compiled classes...'
+                sh 'ls -la target'
+                sh 'ls -la target/classes || echo "target/classes not found"'
+            }
+        }
+
+        stage('Install Keploy') {
+            when {
+                expression { env.TEST_TOOLS == 'keploy' || env.TEST_TOOLS == 'both' }
             }
             steps {
                 echo 'Installing Keploy...'
-                script {
-                    try {
-                        // Create bin directory if it doesn't exist
-                        sh 'mkdir -p $HOME/bin'
-                        
-                        // Download and install Keploy
-                        sh '''
-                            curl -sSL https://keploy.io/install.sh | bash -s -- -b $HOME/bin
-                            export PATH="$HOME/bin:$PATH"
-                            keploy version
-                        '''
-                        
-                        // Verify installation
-                        def keployVersion = sh(script: '$HOME/bin/keploy version', returnStdout: true).trim()
-                        echo "Keploy installed successfully: ${keployVersion}"
-                    } catch (Exception e) {
-                        error "Failed to install Keploy: ${e.message}"
-                    }
+                sh '''
+                    curl --silent -O -L https://keploy.io/install.sh
+                    chmod +x install.sh
+                    bash install.sh
+                    sudo mv keploy /usr/local/bin/keploy || true
+                    sudo chmod +x /usr/local/bin/keploy
+                '''
+            }
+        }
+
+        stage('Run Keploy Tests') {
+            when {
+                expression { env.TEST_TOOLS == 'keploy' || env.TEST_TOOLS == 'both' }
+            }
+            steps {
+                echo 'Running Keploy to generate tests...'
+                sh 'sudo -E keploy test -c "mvn spring-boot:run" --delay 5 --disableANSI'
+            }
+        }
+
+        stage('SonarQube Scan') {
+            when {
+                expression { env.ANALYSIS_TOOLS == 'sonarqube' || env.ANALYSIS_TOOLS == 'both' }
+            }
+            steps {
+                echo 'Running SonarQube scan...'
+                withSonarQubeEnv("${SONAR_SERVER}") {
+                    sh '''
+                        mvn sonar:sonar \
+                        -Dsonar.projectKey=junit-jenkins-demo \
+                        -Dsonar.java.binaries=target/classes \
+                        -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml \
+                        -Dsonar.surefire.reportsPath=target/surefire-reports \
+                        -Dsonar.sources=src/main/java \
+                        -Dsonar.tests=src/test/java \
+                        -Dsonar.java.test.binaries=target/test-classes
+                    '''
                 }
             }
         }
 
-        stage('Keploy Tests') {
+        stage('SYBK Analysis (Placeholder)') {
             when {
-                expression { env.TEST_TOOLS == 'keploy' }
+                expression { env.ANALYSIS_TOOLS == 'sybk' || env.ANALYSIS_TOOLS == 'both' }
             }
             steps {
-                echo 'Running Keploy tests...'
-                script {
-                    try {
-                        withEnv(["PATH=$HOME/bin:$PATH"]) {
-                            sh '''
-                                keploy test -c "mvn spring-boot:run" \
-                                --delay 10 \
-                                --config-path ./keploy-config.yaml \
-                                --testsets-path ./keploy-testsets
-                            '''
-                        }
-                        archiveArtifacts artifacts: 'keploy-testsets/**/*', allowEmptyArchive: true
-                    } catch (Exception e) {
-                        error "Keploy tests failed: ${e.message}"
-                    }
-                }
+                echo 'Running SYBK analysis...'
+                // Replace this with actual SYBK command
+                sh 'echo "SYBK analysis tool executed (placeholder)"'
             }
         }
 
-        /* Security Scanning Stages */
-        stage('GitLeaks Scan') {
+        stage('Upload to JFrog Artifactory') {
             when {
-                expression { env.SECURITY_TOOL == 'gitleaks' }
+                expression { env.JFROG_UPLOAD == 'yes' }
             }
             steps {
-                echo 'Running GitLeaks secret scanning...'
+                echo 'Uploading artifact to JFrog Artifactory...'
                 script {
-                    try {
-                        sh '''
-                            # Install GitLeaks if not present
-                            if ! command -v gitleaks >/dev/null 2>&1; then
-                                curl -sSfL https://raw.githubusercontent.com/gitleaks/gitleaks/master/install.sh | sh
-                                sudo mv bin/gitleaks /usr/local/bin/
-                                rm -rf bin
-                            fi
-                            
-                            # Run scan
-                            gitleaks detect --source=. \
-                                --report-format=json \
-                                --report-path=gitleaks-report.json \
-                                --verbose
-                        '''
-                        archiveArtifacts artifacts: 'gitleaks-report.json', allowEmptyArchive: true
-                    } catch (Exception e) {
-                        unstable "GitLeaks scan found potential secrets or failed: ${e.message}"
-                    }
-                }
-            }
-        }
+                    def server = Artifactory.server 'my-artifactory' // Your Jenkins Artifactory server ID
+                    def buildInfo = Artifactory.newBuildInfo()
 
-        stage('Snyk Scan') {
-            when {
-                expression { env.SECURITY_TOOL == 'snyk' && env.SNYK_TOKEN }
-            }
-            steps {
-                echo 'Running Snyk vulnerability scan...'
-                script {
-                    try {
-                        withCredentials([string(credentialsId: 'snyk-token', variable: 'SNYK_TOKEN')]) {
-                            sh '''
-                                npm install -g snyk
-                                snyk auth ${SNYK_TOKEN}
-                                snyk test --all-projects --json-file-output=snyk-report.json
-                            '''
-                        }
-                        archiveArtifacts artifacts: 'snyk-report.json', allowEmptyArchive: true
-                    } catch (Exception e) {
-                        unstable "Snyk scan found vulnerabilities or failed: ${e.message}"
-                    }
-                }
-            }
-        }
+                    def uploadSpec = """{
+                        "files": [{
+                            "pattern": "target/*.jar",
+                            "target": "libs-release-local/"
+                        }]
+                    }"""
 
-        /* Analysis Platform Stages */
-        stage('SonarQube Analysis') {
-            when {
-                expression { env.ANALYSIS_TOOL == 'sonarqube' }
-            }
-            steps {
-                echo 'Running SonarQube analysis...'
-                script {
-                    try {
-                        withSonarQubeEnv("${SONAR_SERVER}") {
-                            sh '''
-                                mvn sonar:sonar \
-                                -Dsonar.projectKey=${JOB_NAME} \
-                                -Dsonar.java.binaries=target/classes \
-                                -Dsonar.sources=src/main/java \
-                                -Dsonar.tests=src/test/java \
-                                -Dsonar.junit.reportPaths=target/surefire-reports
-                            '''
-                        }
-                    } catch (Exception e) {
-                        error "SonarQube analysis failed: ${e.message}"
-                    }
-                }
-            }
-        }
-
-        stage('JFrog Artifactory Upload') {
-            when {
-                expression { env.ANALYSIS_TOOL == 'jfrog' }
-            }
-            steps {
-                echo 'Uploading artifacts to JFrog...'
-                script {
-                    try {
-                        def server = Artifactory.server(env.ARTIFACTORY_SERVER_ID)
-                        def uploadSpec = """{
-                            "files": [{
-                                "pattern": "target/*.jar",
-                                "target": "libs-release-local/${JOB_NAME}/${BUILD_NUMBER}/",
-                                "props": "build.name=${JOB_NAME};build.number=${BUILD_NUMBER}"
-                            }]
-                        }"""
-                        def buildInfo = server.upload(uploadSpec)
-                        server.publishBuildInfo(buildInfo)
-                    } catch (Exception e) {
-                        error "Artifactory upload failed: ${e.message}"
-                    }
+                    server.upload spec: uploadSpec, buildInfo: buildInfo
+                    server.publishBuildInfo buildInfo
                 }
             }
         }
@@ -220,24 +159,13 @@ pipeline {
 
     post {
         always {
-            echo 'Pipeline execution completed'
-            script {
-                // Archive any remaining artifacts
-                archiveArtifacts artifacts: '**/target/*.jar,**/target/*.war', allowEmptyArchive: true
-            }
+            echo 'Pipeline completed.'
         }
         success {
-            echo """Build succeeded with:
-                   Test Framework: ${env.TEST_TOOLS}
-                   Security Scanner: ${env.SECURITY_TOOL}
-                   Analysis Platform: ${env.ANALYSIS_TOOL}"""
+            echo "Build completed with selected test tools: ${env.TEST_TOOLS}, analysis tools: ${env.ANALYSIS_TOOLS}, JFrog upload: ${env.JFROG_UPLOAD}"
         }
         failure {
-            echo 'Pipeline failed. Check console output for details.'
-            emailext body: """Pipeline ${currentBuild.currentResult}: ${JOB_NAME} #${BUILD_NUMBER}
-                              Check details at: ${BUILD_URL}""",
-                      subject: "Pipeline ${currentBuild.currentResult}: ${JOB_NAME}",
-                      to: 'team@example.com'
+            echo 'Pipeline failed. Check logs for details.'
         }
     }
 }
