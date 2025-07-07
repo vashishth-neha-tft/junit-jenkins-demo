@@ -128,8 +128,20 @@ pipeline {
             }
             steps {
                 echo 'Running SYNK analysis...'
-                // Replace this with actual SYBK command
                 sh 'echo "SYNK analysis tool executed (placeholder)"'
+            }
+        }
+
+        stage('Run Gitleaks Secret Scan') {
+            steps {
+                echo 'Running Gitleaks Docker container to scan for secrets...'
+                sh '''
+                    docker run --rm -v $(pwd):/path zricethezav/gitleaks:latest detect \
+                        --source=/path \
+                        --report-format=json \
+                        --report-path=/path/gitleaks-report.json || echo "Gitleaks completed with findings"
+                '''
+                echo 'Gitleaks scan completed. Review gitleaks-report.json for results.'
             }
         }
 
@@ -140,7 +152,7 @@ pipeline {
             steps {
                 echo 'Uploading artifact to JFrog Artifactory...'
                 script {
-                    def server = Artifactory.server 'my-artifactory' // Your Jenkins Artifactory server ID
+                    def server = Artifactory.server 'my-artifactory'
                     def buildInfo = Artifactory.newBuildInfo()
 
                     def uploadSpec = """{
