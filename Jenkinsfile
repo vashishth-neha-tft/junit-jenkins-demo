@@ -4,6 +4,7 @@ pipeline {
     environment {
         SONAR_SERVER = "MySonarQube"
         PATH = "/usr/local/bin:$PATH"
+        ARTIFACTORY_SERVER_ID = "my-artifactory"
     }
 
     stages {
@@ -114,13 +115,13 @@ pipeline {
             steps {
                 echo 'Uploading artifact to JFrog Artifactory...'
                 script {
-                    def server = Artifactory.server 'my-artifactory' // Your Jenkins server ID
+                    def server = Artifactory.server(env.ARTIFACTORY_SERVER_ID)
                     def buildInfo = Artifactory.newBuildInfo()
 
                     def uploadSpec = """{
                         "files": [{
                             "pattern": "target/*.jar",
-                            "target": "libs-release-local/"
+                            "target": "libs-release-local/test-upload/"
                         }]
                     }"""
 
