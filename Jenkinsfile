@@ -8,136 +8,144 @@ pipeline {
     }
 
     stages {
-        stage('Select Tools') {
+        stage('Select Test Framework') {
             steps {
                 script {
-                    def testChoice = input(
-                        id: 'testChoice',
-                        message: 'Select testing tools to run',
+                    env.TEST_TOOLS = input(
+                        id: 'testFramework',
+                        message: 'Select test framework',
                         parameters: [
-                            choice(name: 'TEST_TOOLS', choices: ['none', 'junit', 'keploy', 'both'], description: 'Choose test tools')
+                            choice(name: 'TEST_FRAMEWORK', 
+                                  choices: ['none', 'junit', 'keploy'], 
+                                  description: 'Choose either JUnit or Keploy')
                         ]
                     )
-                    env.TEST_TOOLS = testChoice
-
-                    def analysisChoice = input(
-                        id: 'analysisChoice',
-                        message: 'Select analysis tools to run',
-                        parameters: [
-                            choice(name: 'ANALYSIS_TOOLS', choices: ['none', 'sonarqube', 'jfrog', 'both'], description: 'Choose analysis tools')
-                        ]
-                    )
-                    env.ANALYSIS_TOOLS = analysisChoice
                 }
             }
         }
 
-        stage('GitLeaks Scan') {
+        stage('Select Security Scanner') {
             steps {
-                echo 'Running GitLeaks secret scanning...'
-                sh '''
-                    # Install GitLeaks if not present
-                    if ! command -v gitleaks &> /dev/null; then
-                        curl -sSfL https://raw.githubusercontent.com/gitleaks/gitleaks/master/install.sh | sh
-                        sudo mv bin/gitleaks /usr/local/bin/
-                    fi
-                    
-                    # Run scan
-                    gitleaks detect --source=. --report-path=gitleaks-report.json || true
-                    
-                    # Archive report
-                    archiveArtifacts artifacts: 'gitleaks-report.json', allowEmptyArchive: true
-                '''
+                script {
+                    env.SECURITY_TOOL = input(
+                        id: 'securityTool',
+                        message: 'Select security scanner',
+                        parameters: [
+                            choice(name: 'SECURITY_SCANNER', 
+                                  choices: ['none', 'gitleaks', 'snyk'], 
+                                  description: 'Choose secret scanning tool')
+                        ]
+                    )
+                }
             }
         }
 
-        stage('Build & Unit Test') {
+        stage('Select Analysis Platform') {
+            steps {
+                script {
+                    env.ANALYSIS_TOOL = input(
+                        id: 'analysisTool',
+                        message: 'Select analysis platform',
+                        parameters: [
+                            choice(name: 'ANALYSIS_PLATFORM', 
+                                  choices: ['none', 'sonarqube', 'jfrog'], 
+                                  description: 'Choose code analysis platform')
+                        ]
+                    )
+                }
+            }
+        }
+
+        /* Test Framework Stages */
+        stage('JUnit Tests') {
             when {
-                expression { env.TEST_TOOLS == 'junit' || env.TEST_TOOLS == 'both' }
+                expression { env.TEST_TOOLS == 'junit' }
             }
             steps {
-                echo 'Running Maven build and unit tests...'
+                echo 'Running Maven build and JUnit tests...'
                 sh 'mvn clean verify -DskipTests=false'
                 junit 'target/surefire-reports/*.xml'
-            }
-        }
-
-        stage('Verify target/classes') {
-            when {
-                expression { env.TEST_TOOLS == 'junit' || env.TEST_TOOLS == 'both' }
-            }
-            steps {
-                echo 'Checking compiled classes...'
-                sh 'ls -la target'
                 sh 'ls -la target/classes || echo "target/classes not found"'
             }
         }
 
-        stage('Install Keploy') {
+        stage('Keploy Tests') {
             when {
-                expression { env.TEST_TOOLS == 'keploy' || env.TEST_TOOLS == 'both' }
+                expression { env.TEST_TOOLS == 'keploy' }
             }
             steps {
-                echo 'Installing Keploy...'
+                echo 'Installing and running Keploy...'
                 sh '''
-                    curl --silent -O -L https://keploy.io/install.sh
-                    chmod +x install.sh
-                    bash install.sh
-                    sudo mv keploy /usr/local/bin/keploy || true
-                    sudo chmod +x /usr/local/bin/keploy
+                    curl -sSL https://keploy.io/install.sh | bash
+                    sudo mv keploy /usr/local/bin/
+                    sudo -E keploy test -c "mvn spring-boot:run" --delay 10
                 '''
             }
         }
 
-        stage('Run Keploy Tests') {
+        /* Security Scanning Stages */
+        stage('GitLeaks Scan') {
             when {
-                expression { env.TEST_TOOLS == 'keploy' || env.TEST_TOOLS == 'both' }
+                expression { env.SECURITY_TOOL == 'gitleaks' }
             }
             steps {
-                echo 'Running Keploy to generate tests...'
-                sh 'sudo -E keploy test -c "mvn spring-boot:run" --delay 5 --disableANSI'
+                echo 'Running GitLeaks secret scanning...'
+                sh '''
+                    curl -sSfL https://raw.githubusercontent.com/gitleaks/gitleaks/master/install.sh | sh
+                    ./bin/gitleaks detect --source=. --report-format=json --report-path=gitleaks-report.json
+                '''
+                archiveArtifacts artifacts: 'gitleaks-report.json', allowEmptyArchive: true
             }
         }
 
-        stage('SonarQube Scan') {
+        stage('Snyk Scan') {
             when {
-                expression { env.ANALYSIS_TOOLS == 'sonarqube' || env.ANALYSIS_TOOLS == 'both' }
+                expression { env.SECURITY_TOOL == 'snyk' }
             }
             steps {
-                echo 'Running SonarQube scan...'
+                echo 'Running Snyk vulnerability scan...'
+                sh '''
+                    npm install -g snyk
+                    snyk auth ${SNYK_TOKEN}
+                    snyk test --all-projects --json-file-output=snyk-report.json
+                '''
+                archiveArtifacts artifacts: 'snyk-report.json', allowEmptyArchive: true
+            }
+        }
+
+        /* Analysis Platform Stages */
+        stage('SonarQube Analysis') {
+            when {
+                expression { env.ANALYSIS_TOOL == 'sonarqube' }
+            }
+            steps {
+                echo 'Running SonarQube analysis...'
                 withSonarQubeEnv("${SONAR_SERVER}") {
                     sh '''
                         mvn sonar:sonar \
-                        -Dsonar.projectKey=junit-jenkins-demo \
+                        -Dsonar.projectKey=${JOB_NAME} \
                         -Dsonar.java.binaries=target/classes \
-                        -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml \
-                        -Dsonar.surefire.reportsPath=target/surefire-reports \
-                        -Dsonar.sources=src/main/java \
-                        -Dsonar.tests=src/test/java \
-                        -Dsonar.java.test.binaries=target/test-classes
+                        -Dsonar.sources=src/main/java
                     '''
                 }
             }
         }
 
-        stage('Upload to JFrog Artifactory') {
+        stage('JFrog Artifactory Upload') {
             when {
-                expression { env.ANALYSIS_TOOLS == 'jfrog' || env.ANALYSIS_TOOLS == 'both' }
+                expression { env.ANALYSIS_TOOL == 'jfrog' }
             }
             steps {
-                echo 'Uploading artifact to JFrog Artifactory...'
+                echo 'Uploading artifacts to JFrog...'
                 script {
                     def server = Artifactory.server(env.ARTIFACTORY_SERVER_ID)
                     def uploadSpec = """{
                         "files": [{
                             "pattern": "target/*.jar",
-                            "target": "libs-release-local/test-upload/",
-                            "props": "build.number=${BUILD_NUMBER}"
+                            "target": "libs-release-local/${JOB_NAME}/${BUILD_NUMBER}/"
                         }]
                     }"""
-                    
-                    def buildInfo = server.upload(uploadSpec)
-                    server.publishBuildInfo(buildInfo)
+                    server.upload(uploadSpec)
                 }
             }
         }
@@ -145,22 +153,24 @@ pipeline {
 
     post {
         always {
-            echo 'Pipeline completed.'
+            echo 'Pipeline execution completed'
             script {
-                // Check GitLeaks report if exists
-                if (fileExists('gitleaks-report.json')) {
-                    def leaks = readJSON file: 'gitleaks-report.json'
-                    if (leaks.find { it }) {
-                        unstable 'GitLeaks found potential secrets in the codebase'
-                    }
+                if (env.SECURITY_TOOL != 'none') {
+                    echo "Security scan (${env.SECURITY_TOOL}) completed"
                 }
             }
         }
         success {
-            echo "Build completed with selected test tools: ${env.TEST_TOOLS}, analysis tools: ${env.ANALYSIS_TOOLS}"
+            echo """Build succeeded with:
+                   Test Framework: ${env.TEST_TOOLS}
+                   Security Scanner: ${env.SECURITY_TOOL}
+                   Analysis Platform: ${env.ANALYSIS_TOOL}"""
         }
         failure {
-            echo 'Pipeline failed. Check logs for details.'
+            echo 'Pipeline failed. Check console output for details.'
+            emailext body: 'Check failed build at ${BUILD_URL}',
+                      subject: 'Pipeline Failed: ${JOB_NAME}',
+                      to: 'team@example.com'
         }
     }
 }
