@@ -4,21 +4,9 @@ pipeline {
     environment {
         SONAR_SERVER = "MySonarQube"
         PATH = "/usr/local/bin:$PATH"
-        // Removed direct credential reference from environment
     }
 
     stages {
-        // === Initial Setup Stage ===
-        stage('Setup Credentials') {
-            steps {
-                withCredentials([string(credentialsId: 'b413b14f-e1e4-48b7-8506-b35b0e939857', variable: 'SNYK_TOKEN')]) {
-                    script {
-                        env.SNYK_TOKEN = SNYK_TOKEN
-                    }
-                }
-            }
-        }
-
         // === Step 1: Select TESTING tools ===
         stage('Select Testing Tools') {
             steps {
@@ -136,13 +124,11 @@ pipeline {
             }
             steps {
                 echo 'Running Snyk analysis...'
-                withCredentials([string(credentialsId: 'b413b14f-e1e4-48b7-8506-b35b0e939857', variable: 'SNYK_TOKEN')]) {
+                withCredentials([string(credentialsId: 'snyk-api-token', variable: 'SNYK_TOKEN')]) {
                     sh '''
                         if ! command -v snyk &> /dev/null; then
-                            echo "Installing Snyk CLI..."
                             npm install -g snyk
                         fi
-
                         snyk auth $SNYK_TOKEN
                         snyk test
                     '''
@@ -200,13 +186,11 @@ pipeline {
         stage('Docker Snyk Compliance Check') {
             steps {
                 echo 'Running Snyk Docker compliance check...'
-                withCredentials([string(credentialsId: 'b413b14f-e1e4-48b7-8506-b35b0e939857', variable: 'SNYK_TOKEN')]) {
+                withCredentials([string(credentialsId: 'snyk-api-token', variable: 'SNYK_TOKEN')]) {
                     sh '''
                         if ! command -v snyk &> /dev/null; then
-                            echo "Installing Snyk CLI..."
                             npm install -g snyk
                         fi
-
                         snyk auth $SNYK_TOKEN
                         docker build -t myapp:latest .
                         snyk test --docker myapp:latest --file=Dockerfile
