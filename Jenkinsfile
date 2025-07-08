@@ -4,6 +4,9 @@ pipeline {
     environment {
         SONAR_SERVER = "MySonarQube"
         PATH = "/usr/local/bin:$PATH"
+        // Configure npm to use workspace directory for global installs
+        NPM_CONFIG_PREFIX = "${env.WORKSPACE}/.npm-global"
+        PATH = "${env.WORKSPACE}/.npm-global/bin:${env.PATH}"
     }
 
     stages {
@@ -85,8 +88,7 @@ pipeline {
                 sh '''
                     curl --silent -O -L https://keploy.io/install.sh
                     chmod +x install.sh
-                    bash install.sh
-                    sudo mv keploy /usr/local/bin/keploy || true
+                    sudo bash install.sh
                     sudo chmod +x /usr/local/bin/keploy
                 '''
             }
@@ -126,11 +128,18 @@ pipeline {
                 echo 'Running Snyk analysis...'
                 withCredentials([string(credentialsId: 'snyk-api-token', variable: 'SNYK_TOKEN')]) {
                     sh '''
+                        # Set up npm global directory in workspace
+                        mkdir -p ${WORKSPACE}/.npm-global
+                        npm config set prefix '${WORKSPACE}/.npm-global'
+                        
+                        # Install Snyk if not present
                         if ! command -v snyk &> /dev/null; then
                             npm install -g snyk
                         fi
+                        
+                        # Authenticate and run scan
                         snyk auth $SNYK_TOKEN
-                        snyk test
+                        snyk test --all-projects
                     '''
                 }
             }
@@ -188,12 +197,19 @@ pipeline {
                 echo 'Running Snyk Docker compliance check...'
                 withCredentials([string(credentialsId: 'snyk-api-token', variable: 'SNYK_TOKEN')]) {
                     sh '''
+                        # Set up npm global directory in workspace
+                        mkdir -p ${WORKSPACE}/.npm-global
+                        npm config set prefix '${WORKSPACE}/.npm-global'
+                        
+                        # Install Snyk if not present
                         if ! command -v snyk &> /dev/null; then
                             npm install -g snyk
                         fi
+                        
+                        # Build and scan Docker image
                         snyk auth $SNYK_TOKEN
                         docker build -t myapp:latest .
-                        snyk test --docker myapp:latest --file=Dockerfile
+                        snyk container test myapp:latest --file=Dockerfile
                     '''
                 }
             }
@@ -203,12 +219,19 @@ pipeline {
     post {
         always {
             echo 'Pipeline execution completed.'
+            // Clean up npm global directory
+            sh 'rm -rf ${WORKSPACE}/.npm-global || true'
         }
         success {
             echo "✔ Build succeeded using: Test Tools=${env.TEST_TOOLS}, Security Tools=${env.SECURITY_TOOLS}, QA Tools=${env.QA_TOOLS}"
+            // Optional: Send success notification
         }
         failure {
             echo '✖ Build failed. Please check the logs for details.'
+            // Optional: Send failure notification
+        }
+        unstable {
+            echo 'Build unstable! Tests failed but pipeline continued.'
         }
     }
 }
