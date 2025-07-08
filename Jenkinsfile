@@ -8,14 +8,15 @@ pipeline {
 
     stages {
 
-        stage('Select Test Tools') {
+        // === Step 1: Select TESTING tools ===
+        stage('Select Testing Tools') {
             steps {
                 script {
                     def testChoice = input(
                         id: 'testChoice',
                         message: 'Select testing tools to run',
                         parameters: [
-                            choice(name: 'TEST_TOOLS', choices: ['none', 'junit', 'keploy', 'both'], description: 'Choose test tools')
+                            choice(name: 'TEST_TOOLS', choices: ['none', 'junit', 'keploy', 'both'], description: 'Choose test tools (junit, keploy, or both)')
                         ]
                     )
                     env.TEST_TOOLS = testChoice
@@ -23,36 +24,39 @@ pipeline {
             }
         }
 
-        stage('Select Analysis Tools') {
+        // === Step 2: Select SECURITY ANALYSIS tools ===
+        stage('Select Security Tools') {
             steps {
                 script {
-                    def analysisChoice = input(
-                        id: 'analysisChoice',
-                        message: 'Select analysis tools to run',
+                    def securityChoice = input(
+                        id: 'securityChoice',
+                        message: 'Select security analysis tools to run',
                         parameters: [
-                            choice(name: 'ANALYSIS_TOOLS', choices: ['none', 'sonarqube', 'synk', 'both'], description: 'Choose analysis tools')
+                            choice(name: 'SECURITY_TOOLS', choices: ['none', 'gitleaks', 'snyk', 'both'], description: 'Choose secret scanning tools (gitleaks, snyk, or both)')
                         ]
                     )
-                    env.ANALYSIS_TOOLS = analysisChoice
+                    env.SECURITY_TOOLS = securityChoice
                 }
             }
         }
 
-        stage('Select JFrog Upload Option') {
+        // === Step 3: Select QUALITY / ARTIFACT tools ===
+        stage('Select Code Quality / Artifact Tools') {
             steps {
                 script {
-                    def jfrogChoice = input(
-                        id: 'jfrogChoice',
-                        message: 'Do you want to upload artifact to JFrog?',
+                    def qaChoice = input(
+                        id: 'qaChoice',
+                        message: 'Select code quality and artifact upload tools',
                         parameters: [
-                            choice(name: 'JFROG_UPLOAD', choices: ['no', 'yes'], description: 'Upload to JFrog Artifactory?')
+                            choice(name: 'QA_TOOLS', choices: ['none', 'sonarqube', 'jfrog', 'both'], description: 'Choose SonarQube, JFrog, or both')
                         ]
                     )
-                    env.JFROG_UPLOAD = jfrogChoice
+                    env.QA_TOOLS = qaChoice
                 }
             }
         }
 
+        // === Build and Test ===
         stage('Build & Unit Test') {
             when {
                 expression { env.TEST_TOOLS == 'junit' || env.TEST_TOOLS == 'both' }
@@ -75,6 +79,7 @@ pipeline {
             }
         }
 
+        // === Keploy Setup & Run ===
         stage('Install Keploy') {
             when {
                 expression { env.TEST_TOOLS == 'keploy' || env.TEST_TOOLS == 'both' }
@@ -101,9 +106,37 @@ pipeline {
             }
         }
 
+        // === Security Scans ===
+        stage('Run Gitleaks Secret Scan') {
+            when {
+                expression { env.SECURITY_TOOLS == 'gitleaks' || env.SECURITY_TOOLS == 'both' }
+            }
+            steps {
+                echo 'Running Gitleaks...'
+                sh '''
+                    docker run --rm -v $(pwd):/path zricethezav/gitleaks:latest detect \
+                        --source=/path \
+                        --report-format=json \
+                        --report-path=/path/gitleaks-report.json || echo "Gitleaks completed with findings"
+                '''
+                echo 'Gitleaks scan completed. Check gitleaks-report.json.'
+            }
+        }
+
+        stage('Snyk Analysis') {
+            when {
+                expression { env.SECURITY_TOOLS == 'snyk' || env.SECURITY_TOOLS == 'both' }
+            }
+            steps {
+                echo 'Running Snyk analysis (placeholder)...'
+                sh 'echo "Snyk analysis would run here..."'
+            }
+        }
+
+        // === SonarQube Scan ===
         stage('SonarQube Scan') {
             when {
-                expression { env.ANALYSIS_TOOLS == 'sonarqube' || env.ANALYSIS_TOOLS == 'both' }
+                expression { env.QA_TOOLS == 'sonarqube' || env.QA_TOOLS == 'both' }
             }
             steps {
                 echo 'Running SonarQube scan...'
@@ -122,32 +155,10 @@ pipeline {
             }
         }
 
-        stage('SYNK Analysis (Placeholder)') {
-            when {
-                expression { env.ANALYSIS_TOOLS == 'synk' || env.ANALYSIS_TOOLS == 'both' }
-            }
-            steps {
-                echo 'Running SYNK analysis...'
-                sh 'echo "SYNK analysis tool executed (placeholder)"'
-            }
-        }
-
-        stage('Run Gitleaks Secret Scan') {
-            steps {
-                echo 'Running Gitleaks Docker container to scan for secrets...'
-                sh '''
-                    docker run --rm -v $(pwd):/path zricethezav/gitleaks:latest detect \
-                        --source=/path \
-                        --report-format=json \
-                        --report-path=/path/gitleaks-report.json || echo "Gitleaks completed with findings"
-                '''
-                echo 'Gitleaks scan completed. Review gitleaks-report.json for results.'
-            }
-        }
-
+        // === JFrog Upload ===
         stage('Upload to JFrog Artifactory') {
             when {
-                expression { env.JFROG_UPLOAD == 'yes' }
+                expression { env.QA_TOOLS == 'jfrog' || env.QA_TOOLS == 'both' }
             }
             steps {
                 echo 'Uploading artifact to JFrog Artifactory...'
@@ -174,10 +185,10 @@ pipeline {
             echo 'Pipeline completed.'
         }
         success {
-            echo "Build completed with selected test tools: ${env.TEST_TOOLS}, analysis tools: ${env.ANALYSIS_TOOLS}, JFrog upload: ${env.JFROG_UPLOAD}"
+            echo "✔ Build completed with test tools: ${env.TEST_TOOLS}, security tools: ${env.SECURITY_TOOLS}, QA tools: ${env.QA_TOOLS}"
         }
         failure {
-            echo 'Pipeline failed. Check logs for details.'
+            echo '✖ Pipeline failed. Check logs for details.'
         }
     }
 }
