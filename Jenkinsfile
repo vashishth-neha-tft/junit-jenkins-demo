@@ -3,10 +3,9 @@ pipeline {
 
     environment {
         SONAR_SERVER = "MySonarQube"
-        PATH = "/usr/local/bin:$PATH"
-        // Configure npm to use workspace directory for global installs
+        // Combine PATH definitions into one line
+        PATH = "${env.WORKSPACE}/.npm-global/bin:/usr/local/bin:$PATH"
         NPM_CONFIG_PREFIX = "${env.WORKSPACE}/.npm-global"
-        PATH = "${env.WORKSPACE}/.npm-global/bin:${env.PATH}"
     }
 
     stages {
@@ -224,11 +223,9 @@ pipeline {
         }
         success {
             echo "✔ Build succeeded using: Test Tools=${env.TEST_TOOLS}, Security Tools=${env.SECURITY_TOOLS}, QA Tools=${env.QA_TOOLS}"
-            // Optional: Send success notification
         }
         failure {
             echo '✖ Build failed. Please check the logs for details.'
-            // Optional: Send failure notification
         }
         unstable {
             echo 'Build unstable! Tests failed but pipeline continued.'
