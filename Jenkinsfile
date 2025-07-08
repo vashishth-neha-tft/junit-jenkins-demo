@@ -4,6 +4,7 @@ pipeline {
     environment {
         SONAR_SERVER = "MySonarQube"
         PATH = "/usr/local/bin:$PATH"
+        SNYK_TOKEN = credentials('b413b14f-e1e4-48b7-8506-b35b0e939857') // Replace with actual Jenkins secret ID
     }
 
     stages {
@@ -176,6 +177,27 @@ pipeline {
                     server.upload spec: uploadSpec, buildInfo: buildInfo
                     server.publishBuildInfo buildInfo
                 }
+            }
+        }
+
+        // === MANDATORY: Docker Compliance Check with Snyk ===
+        stage('Docker Compliance Check with Snyk') {
+            steps {
+                echo 'Running Docker image compliance check with Snyk...'
+                sh '''
+                    if ! command -v snyk &> /dev/null; then
+                        echo "Installing Snyk CLI..."
+                        npm install -g snyk
+                    fi
+
+                    snyk auth $SNYK_TOKEN
+
+                    echo "Building Docker image..."
+                    docker build -t myapp:latest .
+
+                    echo "Running Snyk Docker scan..."
+                    snyk test --docker myapp:latest --file=Dockerfile
+                '''
             }
         }
     }
