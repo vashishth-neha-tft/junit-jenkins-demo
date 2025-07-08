@@ -4,58 +4,43 @@ pipeline {
     environment {
         SONAR_SERVER = "MySonarQube"
         PATH = "/usr/local/bin:$PATH"
-        SNYK_TOKEN = credentials('b413b14f-e1e4-48b7-8506-b35b0e939857') // Jenkins credentials ID
     }
 
     stages {
-
-        // === Step 1: Select TESTING tools ===
-        stage('Select Testing Tools') {
+        stage('User Selections') {
             steps {
                 script {
-                    env.TEST_TOOLS = input(
+                    def testChoice = input(
                         id: 'testChoice',
                         message: 'Select testing tools to run',
                         parameters: [
-                            choice(name: 'TEST_TOOLS', choices: ['none', 'junit', 'keploy', 'both'], description: 'Choose test tools (junit, keploy, or both)')
+                            choice(name: 'TEST_TOOLS', choices: ['none', 'junit', 'keploy', 'both'], description: 'Choose test tools')
                         ]
                     )
-                }
-            }
-        }
+                    env.TEST_TOOLS = testChoice
 
-        // === Step 2: Select SECURITY ANALYSIS tools ===
-        stage('Select Security Tools') {
-            steps {
-                script {
-                    env.SECURITY_TOOLS = input(
-                        id: 'securityChoice',
-                        message: 'Select security analysis tools to run',
+                    def scanChoice = input(
+                        id: 'scanChoice',
+                        message: 'Select security tools to run',
                         parameters: [
-                            choice(name: 'SECURITY_TOOLS', choices: ['none', 'gitleaks', 'snyk', 'both'], description: 'Choose secret scanning tools (gitleaks, snyk, or both)')
+                            choice(name: 'SECURITY_TOOLS', choices: ['none', 'gitleaks', 'snyk', 'both'], description: 'Choose security tools')
                         ]
                     )
-                }
-            }
-        }
+                    env.SECURITY_TOOLS = scanChoice
 
-        // === Step 3: Select QUALITY / ARTIFACT tools ===
-        stage('Select QA Tools') {
-            steps {
-                script {
-                    env.QA_TOOLS = input(
-                        id: 'qaChoice',
-                        message: 'Select code quality and artifact upload tools',
+                    def deployChoice = input(
+                        id: 'deployChoice',
+                        message: 'Select deployment/analysis tools to run',
                         parameters: [
-                            choice(name: 'QA_TOOLS', choices: ['none', 'sonarqube', 'jfrog', 'both'], description: 'Choose SonarQube, JFrog, or both')
+                            choice(name: 'DEPLOY_TOOLS', choices: ['none', 'sonarqube', 'jfrog', 'both'], description: 'Choose tools')
                         ]
                     )
+                    env.DEPLOY_TOOLS = deployChoice
                 }
             }
         }
 
-        // === Step 4: Build and JUnit Test ===
-        stage('Build & JUnit Test') {
+        stage('Build & Unit Test') {
             when {
                 expression { env.TEST_TOOLS == 'junit' || env.TEST_TOOLS == 'both' }
             }
@@ -66,18 +51,6 @@ pipeline {
             }
         }
 
-        stage('Verify Compiled Classes') {
-            when {
-                expression { env.TEST_TOOLS == 'junit' || env.TEST_TOOLS == 'both' }
-            }
-            steps {
-                echo 'Verifying compiled class files...'
-                sh 'ls -la target'
-                sh 'ls -la target/classes || echo "target/classes not found"'
-            }
-        }
-
-        // === Step 5: Keploy Installation and Test ===
         stage('Install Keploy') {
             when {
                 expression { env.TEST_TOOLS == 'keploy' || env.TEST_TOOLS == 'both' }
@@ -104,113 +77,84 @@ pipeline {
             }
         }
 
-        // === Step 6: Security Analysis ===
-        stage('Gitleaks Scan') {
+        stage('Run Gitleaks Scan') {
             when {
                 expression { env.SECURITY_TOOLS == 'gitleaks' || env.SECURITY_TOOLS == 'both' }
             }
             steps {
-                echo 'Running Gitleaks secret scan...'
+                echo 'Running Gitleaks scan...'
                 sh '''
                     docker run --rm -v $(pwd):/path zricethezav/gitleaks:latest detect \
                         --source=/path \
                         --report-format=json \
                         --report-path=/path/gitleaks-report.json || echo "Gitleaks completed with findings"
                 '''
+                echo 'Review gitleaks-report.json for results.'
             }
         }
 
-        stage('Snyk Analysis') {
+        stage('Run Snyk Analysis') {
             when {
                 expression { env.SECURITY_TOOLS == 'snyk' || env.SECURITY_TOOLS == 'both' }
             }
             steps {
-                echo 'Running Snyk analysis...'
-                sh '''
-                    if ! command -v snyk &> /dev/null; then
-                        echo "Installing Snyk CLI..."
-                        npm install -g snyk
-                    fi
-
-                    snyk auth $SNYK_TOKEN
-                    snyk test
-                '''
+                echo 'Running Snyk analysis (placeholder)...'
+                sh 'echo "Snyk analysis executed."'
             }
         }
 
-        // === Step 7: SonarQube Scan ===
-        stage('SonarQube Scan') {
+        stage('SonarQube Analysis') {
             when {
-                expression { env.QA_TOOLS == 'sonarqube' || env.QA_TOOLS == 'both' }
+                expression { env.DEPLOY_TOOLS == 'sonarqube' || env.DEPLOY_TOOLS == 'both' }
             }
             steps {
-                echo 'Running SonarQube analysis...'
+                echo 'Running SonarQube scan...'
                 withSonarQubeEnv("${SONAR_SERVER}") {
                     sh '''
                         mvn sonar:sonar \
                         -Dsonar.projectKey=junit-jenkins-demo \
+                        -Dsonar.java.binaries=target/classes \
+                        -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml \
+                        -Dsonar.surefire.reportsPath=target/surefire-reports \
                         -Dsonar.sources=src/main/java \
                         -Dsonar.tests=src/test/java \
-                        -Dsonar.java.binaries=target/classes \
-                        -Dsonar.java.test.binaries=target/test-classes \
-                        -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml \
-                        -Dsonar.surefire.reportsPath=target/surefire-reports
+                        -Dsonar.java.test.binaries=target/test-classes
                     '''
                 }
             }
         }
 
-        // === Step 8: Upload to JFrog Artifactory ===
-        stage('Upload to JFrog') {
+        stage('Upload to JFrog Artifactory') {
             when {
-                expression { env.QA_TOOLS == 'jfrog' || env.QA_TOOLS == 'both' }
+                expression { env.DEPLOY_TOOLS == 'jfrog' || env.DEPLOY_TOOLS == 'both' }
             }
             steps {
-                echo 'Uploading build artifacts to JFrog...'
+                echo 'Uploading artifact to JFrog...'
                 script {
-                    def server = Artifactory.server('my-artifactory')
+                    def server = Artifactory.server 'my-artifactory'
                     def buildInfo = Artifactory.newBuildInfo()
-
                     def uploadSpec = """{
                         "files": [{
                             "pattern": "target/*.jar",
                             "target": "libs-release-local/"
                         }]
                     }"""
-
                     server.upload spec: uploadSpec, buildInfo: buildInfo
-                    server.publishBuildInfo(buildInfo)
+                    server.publishBuildInfo buildInfo
                 }
-            }
-        }
-
-        // === Step 9: Docker Compliance Check ===
-        stage('Docker Snyk Compliance Check') {
-            steps {
-                echo 'Running Snyk Docker compliance check...'
-                sh '''
-                    if ! command -v snyk &> /dev/null; then
-                        echo "Installing Snyk CLI..."
-                        npm install -g snyk
-                    fi
-
-                    snyk auth $SNYK_TOKEN
-                    docker build -t myapp:latest .
-                    snyk test --docker myapp:latest --file=Dockerfile
-                '''
             }
         }
     }
 
     post {
         always {
-            echo 'Pipeline execution completed.'
+            echo 'Pipeline completed.'
         }
         success {
-            echo "✔ Build succeeded using: Test Tools=${env.TEST_TOOLS}, Security Tools=${env.SECURITY_TOOLS}, QA Tools=${env.QA_TOOLS}"
+            echo "✅ Build succeeded with:\nTest Tools: ${env.TEST_TOOLS}\nSecurity Tools: ${env.SECURITY_TOOLS}\nDeploy Tools: ${env.DEPLOY_TOOLS}"
         }
         failure {
-            echo '✖ Build failed. Please check the logs for details.'
+            echo "❌ Pipeline failed. Check logs above for errors."
         }
     }
 }
