@@ -3,7 +3,6 @@ pipeline {
 
     environment {
         SONAR_SERVER = "MySonarQube"
-        // Combine PATH definitions into one line
         PATH = "${env.WORKSPACE}/.npm-global/bin:/usr/local/bin:$PATH"
         NPM_CONFIG_PREFIX = "${env.WORKSPACE}/.npm-global"
     }
@@ -193,23 +192,30 @@ pipeline {
         // === Step 9: Docker Compliance Check ===
         stage('Docker Snyk Compliance Check') {
             steps {
-                echo 'Running Snyk Docker compliance check...'
-                withCredentials([string(credentialsId: 'snyk-api-token', variable: 'SNYK_TOKEN')]) {
-                    sh '''
-                        # Set up npm global directory in workspace
-                        mkdir -p ${WORKSPACE}/.npm-global
-                        npm config set prefix '${WORKSPACE}/.npm-global'
-                        
-                        # Install Snyk if not present
-                        if ! command -v snyk &> /dev/null; then
-                            npm install -g snyk
-                        fi
-                        
-                        # Build and scan Docker image
-                        snyk auth $SNYK_TOKEN
-                        docker build -t myapp:latest .
-                        snyk container test myapp:latest --file=Dockerfile
-                    '''
+                script {
+                    // Check if Dockerfile exists before proceeding
+                    if (fileExists('Dockerfile')) {
+                        echo 'Running Snyk Docker compliance check...'
+                        withCredentials([string(credentialsId: 'snyk-api-token', variable: 'SNYK_TOKEN')]) {
+                            sh '''
+                                # Set up npm global directory in workspace
+                                mkdir -p ${WORKSPACE}/.npm-global
+                                npm config set prefix '${WORKSPACE}/.npm-global'
+                                
+                                # Install Snyk if not present
+                                if ! command -v snyk &> /dev/null; then
+                                    npm install -g snyk
+                                fi
+                                
+                                # Build and scan Docker image
+                                snyk auth $SNYK_TOKEN
+                                docker build -t myapp:latest .
+                                snyk container test myapp:latest --file=Dockerfile
+                            '''
+                        }
+                    } else {
+                        echo 'Skipping Docker scan: No Dockerfile found in project root'
+                    }
                 }
             }
         }
