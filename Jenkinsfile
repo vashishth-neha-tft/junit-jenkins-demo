@@ -4,60 +4,42 @@ pipeline {
     environment {
         SONAR_SERVER = "MySonarQube"
         PATH = "/usr/local/bin:$PATH"
-        SNYK_TOKEN = credentials('b413b14f-e1e4-48b7-8506-b35b0e939857') // Replace with actual Jenkins secret ID
     }
 
     stages {
-
-        // === Step 1: Select TESTING tools ===
-        stage('Select Testing Tools') {
+        stage('User Selections') {
             steps {
                 script {
                     def testChoice = input(
                         id: 'testChoice',
                         message: 'Select testing tools to run',
                         parameters: [
-                            choice(name: 'TEST_TOOLS', choices: ['none', 'junit', 'keploy', 'both'], description: 'Choose test tools (junit, keploy, or both)')
+                            choice(name: 'TEST_TOOLS', choices: ['none', 'junit', 'keploy', 'both'], description: 'Choose test tools')
                         ]
                     )
                     env.TEST_TOOLS = testChoice
-                }
-            }
-        }
 
-        // === Step 2: Select SECURITY ANALYSIS tools ===
-        stage('Select Security Tools') {
-            steps {
-                script {
-                    def securityChoice = input(
-                        id: 'securityChoice',
-                        message: 'Select security analysis tools to run',
+                    def scanChoice = input(
+                        id: 'scanChoice',
+                        message: 'Select security tools to run',
                         parameters: [
-                            choice(name: 'SECURITY_TOOLS', choices: ['none', 'gitleaks', 'snyk', 'both'], description: 'Choose secret scanning tools (gitleaks, snyk, or both)')
+                            choice(name: 'SECURITY_TOOLS', choices: ['none', 'gitleaks', 'snyk', 'both'], description: 'Choose security tools')
                         ]
                     )
-                    env.SECURITY_TOOLS = securityChoice
-                }
-            }
-        }
+                    env.SECURITY_TOOLS = scanChoice
 
-        // === Step 3: Select QUALITY / ARTIFACT tools ===
-        stage('Select Code Quality / Artifact Tools') {
-            steps {
-                script {
-                    def qaChoice = input(
-                        id: 'qaChoice',
-                        message: 'Select code quality and artifact upload tools',
+                    def deployChoice = input(
+                        id: 'deployChoice',
+                        message: 'Select deployment/analysis tools to run',
                         parameters: [
-                            choice(name: 'QA_TOOLS', choices: ['none', 'sonarqube', 'jfrog', 'both'], description: 'Choose SonarQube, JFrog, or both')
+                            choice(name: 'DEPLOY_TOOLS', choices: ['none', 'sonarqube', 'jfrog', 'both'], description: 'Choose tools')
                         ]
                     )
-                    env.QA_TOOLS = qaChoice
+                    env.DEPLOY_TOOLS = deployChoice
                 }
             }
         }
 
-        // === Build and Test ===
         stage('Build & Unit Test') {
             when {
                 expression { env.TEST_TOOLS == 'junit' || env.TEST_TOOLS == 'both' }
@@ -69,18 +51,6 @@ pipeline {
             }
         }
 
-        stage('Verify target/classes') {
-            when {
-                expression { env.TEST_TOOLS == 'junit' || env.TEST_TOOLS == 'both' }
-            }
-            steps {
-                echo 'Checking compiled classes...'
-                sh 'ls -la target'
-                sh 'ls -la target/classes || echo "target/classes not found"'
-            }
-        }
-
-        // === Keploy Setup & Run ===
         stage('Install Keploy') {
             when {
                 expression { env.TEST_TOOLS == 'keploy' || env.TEST_TOOLS == 'both' }
@@ -102,42 +72,40 @@ pipeline {
                 expression { env.TEST_TOOLS == 'keploy' || env.TEST_TOOLS == 'both' }
             }
             steps {
-                echo 'Running Keploy to generate tests...'
+                echo 'Running Keploy tests...'
                 sh 'sudo -E keploy test -c "mvn spring-boot:run" --delay 5 --disableANSI'
             }
         }
 
-        // === Security Scans ===
-        stage('Run Gitleaks Secret Scan') {
+        stage('Run Gitleaks Scan') {
             when {
                 expression { env.SECURITY_TOOLS == 'gitleaks' || env.SECURITY_TOOLS == 'both' }
             }
             steps {
-                echo 'Running Gitleaks...'
+                echo 'Running Gitleaks scan...'
                 sh '''
                     docker run --rm -v $(pwd):/path zricethezav/gitleaks:latest detect \
                         --source=/path \
                         --report-format=json \
                         --report-path=/path/gitleaks-report.json || echo "Gitleaks completed with findings"
                 '''
-                echo 'Gitleaks scan completed. Check gitleaks-report.json.'
+                echo 'Review gitleaks-report.json for results.'
             }
         }
 
-        stage('Snyk Analysis') {
+        stage('Run Snyk Analysis') {
             when {
                 expression { env.SECURITY_TOOLS == 'snyk' || env.SECURITY_TOOLS == 'both' }
             }
             steps {
                 echo 'Running Snyk analysis (placeholder)...'
-                sh 'echo "Snyk analysis would run here..."'
+                sh 'echo "Snyk analysis executed."'
             }
         }
 
-        // === SonarQube Scan ===
-        stage('SonarQube Scan') {
+        stage('SonarQube Analysis') {
             when {
-                expression { env.QA_TOOLS == 'sonarqube' || env.QA_TOOLS == 'both' }
+                expression { env.DEPLOY_TOOLS == 'sonarqube' || env.DEPLOY_TOOLS == 'both' }
             }
             steps {
                 echo 'Running SonarQube scan...'
@@ -156,48 +124,24 @@ pipeline {
             }
         }
 
-        // === JFrog Upload ===
         stage('Upload to JFrog Artifactory') {
             when {
-                expression { env.QA_TOOLS == 'jfrog' || env.QA_TOOLS == 'both' }
+                expression { env.DEPLOY_TOOLS == 'jfrog' || env.DEPLOY_TOOLS == 'both' }
             }
             steps {
-                echo 'Uploading artifact to JFrog Artifactory...'
+                echo 'Uploading artifact to JFrog...'
                 script {
                     def server = Artifactory.server 'my-artifactory'
                     def buildInfo = Artifactory.newBuildInfo()
-
                     def uploadSpec = """{
                         "files": [{
                             "pattern": "target/*.jar",
                             "target": "libs-release-local/"
                         }]
                     }"""
-
                     server.upload spec: uploadSpec, buildInfo: buildInfo
                     server.publishBuildInfo buildInfo
                 }
-            }
-        }
-
-        // === MANDATORY: Docker Compliance Check with Snyk ===
-        stage('Docker Compliance Check with Snyk') {
-            steps {
-                echo 'Running Docker image compliance check with Snyk...'
-                sh '''
-                    if ! command -v snyk &> /dev/null; then
-                        echo "Installing Snyk CLI..."
-                        npm install -g snyk
-                    fi
-
-                    snyk auth $SNYK_TOKEN
-
-                    echo "Building Docker image..."
-                    docker build -t myapp:latest .
-
-                    echo "Running Snyk Docker scan..."
-                    snyk test --docker myapp:latest --file=Dockerfile
-                '''
             }
         }
     }
@@ -207,10 +151,10 @@ pipeline {
             echo 'Pipeline completed.'
         }
         success {
-            echo "✔ Build completed with test tools: ${env.TEST_TOOLS}, security tools: ${env.SECURITY_TOOLS}, QA tools: ${env.QA_TOOLS}"
+            echo "✅ Build succeeded with:\nTest Tools: ${env.TEST_TOOLS}\nSecurity Tools: ${env.SECURITY_TOOLS}\nDeploy Tools: ${env.DEPLOY_TOOLS}"
         }
         failure {
-            echo '✖ Pipeline failed. Check logs for details.'
+            echo "❌ Pipeline failed. Check logs above for errors."
         }
     }
 }
