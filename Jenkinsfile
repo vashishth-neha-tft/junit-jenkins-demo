@@ -5,9 +5,17 @@ pipeline {
         SONAR_SERVER = "MySonarQube"
         PATH = "${env.WORKSPACE}/.npm-global/bin:/usr/local/bin:$PATH"
         NPM_CONFIG_PREFIX = "${env.WORKSPACE}/.npm-global"
+        LOG_DIR = "${env.WORKSPACE}/logs"
     }
 
     stages {
+        stage('Setup Logging') {
+            steps {
+                sh 'mkdir -p ${LOG_DIR}'
+                sh 'rm -f ${LOG_DIR}/*.log || true'
+            }
+        }
+
         // === Step 1: Select TESTING tools ===
         stage('Select Testing Tools') {
             steps {
@@ -60,7 +68,7 @@ pipeline {
             }
             steps {
                 echo 'Running Maven build and unit tests...'
-                sh 'mvn clean verify -DskipTests=false'
+                sh 'mvn clean verify -DskipTests=false 2>&1 | tee ${LOG_DIR}/maven_build.log'
                 junit 'target/surefire-reports/*.xml'
             }
         }
@@ -71,8 +79,8 @@ pipeline {
             }
             steps {
                 echo 'Verifying compiled class files...'
-                sh 'ls -la target'
-                sh 'ls -la target/classes || echo "target/classes not found"'
+                sh 'ls -la target 2>&1 | tee -a ${LOG_DIR}/class_verification.log'
+                sh 'ls -la target/classes 2>&1 | tee -a ${LOG_DIR}/class_verification.log || echo "target/classes not found"'
             }
         }
 
@@ -84,9 +92,9 @@ pipeline {
             steps {
                 echo 'Installing Keploy...'
                 sh '''
-                    curl --silent -O -L https://keploy.io/install.sh
+                    curl --silent -O -L https://keploy.io/install.sh 2>&1 | tee ${LOG_DIR}/keploy_install.log
                     chmod +x install.sh
-                    sudo bash install.sh
+                    sudo bash install.sh 2>&1 | tee -a ${LOG_DIR}/keploy_install.log
                     sudo chmod +x /usr/local/bin/keploy
                 '''
             }
@@ -98,7 +106,7 @@ pipeline {
             }
             steps {
                 echo 'Running Keploy tests...'
-                sh 'sudo -E keploy test -c "mvn spring-boot:run" --delay 5 --disableANSI'
+                sh 'sudo -E keploy test -c "mvn spring-boot:run" --delay 5 --disableANSI 2>&1 | tee ${LOG_DIR}/keploy_tests.log'
             }
         }
 
@@ -113,7 +121,7 @@ pipeline {
                     docker run --rm -v $(pwd):/path zricethezav/gitleaks:latest detect \
                         --source=/path \
                         --report-format=json \
-                        --report-path=/path/gitleaks-report.json || echo "Gitleaks completed with findings"
+                        --report-path=/path/gitleaks-report.json 2>&1 | tee ${LOG_DIR}/gitleaks_scan.log || echo "Gitleaks completed with findings"
                 '''
             }
         }
@@ -132,12 +140,12 @@ pipeline {
                         
                         # Install Snyk if not present
                         if ! command -v snyk &> /dev/null; then
-                            npm install -g snyk
+                            npm install -g snyk 2>&1 | tee ${LOG_DIR}/snyk_install.log
                         fi
                         
                         # Authenticate and run scan
-                        snyk auth $SNYK_TOKEN
-                        snyk test --all-projects
+                        snyk auth $SNYK_TOKEN 2>&1 | tee ${LOG_DIR}/snyk_auth.log
+                        snyk test --all-projects 2>&1 | tee ${LOG_DIR}/snyk_scan.log
                     '''
                 }
             }
@@ -159,7 +167,7 @@ pipeline {
                         -Dsonar.java.binaries=target/classes \
                         -Dsonar.java.test.binaries=target/test-classes \
                         -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml \
-                        -Dsonar.surefire.reportsPath=target/surefire-reports
+                        -Dsonar.surefire.reportsPath=target/surefire-reports 2>&1 | tee ${LOG_DIR}/sonarqube_scan.log
                     '''
                 }
             }
@@ -185,6 +193,9 @@ pipeline {
 
                     server.upload spec: uploadSpec, buildInfo: buildInfo
                     server.publishBuildInfo(buildInfo)
+                    
+                    // Log the upload details
+                    writeFile file: "${LOG_DIR}/jfrog_upload.log", text: "Uploaded files matching pattern: target/*.jar"
                 }
             }
         }
@@ -204,17 +215,18 @@ pipeline {
                                 
                                 # Install Snyk if not present
                                 if ! command -v snyk &> /dev/null; then
-                                    npm install -g snyk
+                                    npm install -g snyk 2>&1 | tee ${LOG_DIR}/docker_snyk_install.log
                                 fi
                                 
                                 # Build and scan Docker image
-                                snyk auth $SNYK_TOKEN
-                                docker build -t myapp:latest .
-                                snyk container test myapp:latest --file=Dockerfile
+                                snyk auth $SNYK_TOKEN 2>&1 | tee ${LOG_DIR}/docker_snyk_auth.log
+                                docker build -t myapp:latest . 2>&1 | tee ${LOG_DIR}/docker_build.log
+                                snyk container test myapp:latest --file=Dockerfile 2>&1 | tee ${LOG_DIR}/docker_scan.log
                             '''
                         }
                     } else {
                         echo 'Skipping Docker scan: No Dockerfile found in project root'
+                        writeFile file: "${LOG_DIR}/docker_scan.log", text: "No Dockerfile found - scan skipped"
                     }
                 }
             }
@@ -224,14 +236,42 @@ pipeline {
     post {
         always {
             echo 'Pipeline execution completed.'
-            // Clean up npm global directory
-            sh 'rm -rf ${WORKSPACE}/.npm-global || true'
+            script {
+                // Generate consolidated log
+                sh '''
+                    echo "===== CONSOLIDATED PIPELINE LOG =====" > ${LOG_DIR}/consolidated_pipeline.log
+                    echo "Pipeline execution completed at: $(date)" >> ${LOG_DIR}/consolidated_pipeline.log
+                    echo "Test Tools: ${TEST_TOOLS}" >> ${LOG_DIR}/consolidated_pipeline.log
+                    echo "Security Tools: ${SECURITY_TOOLS}" >> ${LOG_DIR}/consolidated_pipeline.log
+                    echo "QA Tools: ${QA_TOOLS}" >> ${LOG_DIR}/consolidated_pipeline.log
+                    echo "" >> ${LOG_DIR}/consolidated_pipeline.log
+                    
+                    # Append all individual logs
+                    for log in ${LOG_DIR}/*.log; do
+                        if [ "$(basename $log)" != "consolidated_pipeline.log" ]; then
+                            echo "===== $(basename $log) =====" >> ${LOG_DIR}/consolidated_pipeline.log
+                            cat $log >> ${LOG_DIR}/consolidated_pipeline.log
+                            echo "" >> ${LOG_DIR}/consolidated_pipeline.log
+                        fi
+                    done
+                '''
+                
+                // Archive all logs
+                archiveArtifacts artifacts: 'logs/**/*.log', allowEmptyArchive: true
+                
+                // Clean up
+                sh 'rm -rf ${WORKSPACE}/.npm-global || true'
+            }
         }
         success {
             echo "✔ Build succeeded using: Test Tools=${env.TEST_TOOLS}, Security Tools=${env.SECURITY_TOOLS}, QA Tools=${env.QA_TOOLS}"
         }
         failure {
             echo '✖ Build failed. Please check the logs for details.'
+            script {
+                // Include failure details in logs
+                writeFile file: "${LOG_DIR}/pipeline_failure.log", text: "Pipeline failed at stage: ${currentBuild.result}"
+            }
         }
         unstable {
             echo 'Build unstable! Tests failed but pipeline continued.'
