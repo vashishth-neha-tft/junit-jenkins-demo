@@ -16,6 +16,21 @@ pipeline {
             }
         }
 
+        stage('Show Build User') {
+            steps {
+                script {
+                    def userId = 'UNKNOWN'
+                    for (cause in currentBuild.rawBuild.getCauses()) {
+                        if (cause.userId) {
+                            userId = cause.userId
+                            break
+                        }
+                    }
+                    echo "Build triggered by user: ${userId}"
+                }
+            }
+        }
+
         // === Step 1: Select TESTING tools ===
         stage('Select Testing Tools') {
             steps {
