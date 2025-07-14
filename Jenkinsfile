@@ -16,21 +16,12 @@ pipeline {
             }
         }
 
-        stage('Show Build User') {
+        stage('Display User Info') {
             steps {
                 script {
-                    def userId = 'UNKNOWN'
-                    def userName = 'UNKNOWN'
-                    for (cause in currentBuild.rawBuild.getCauses()) {
-                        if (cause.userId) {
-                            userId = cause.userId
-                        }
-                        if (cause.userName) {
-                            userName = cause.userName
-                        }
-                    }
-                    echo "Build triggered by user ID: ${userId}"
-                    echo "Build triggered by user name: ${userName}"
+                    echo "Pipeline triggered by user:  [36m${currentBuild.getBuildCauses()[0]?.userId} [0m"
+                    // Or for more detailed information:
+                    echo "Build causes: ${currentBuild.getBuildCauses()}"
                 }
             }
         }
