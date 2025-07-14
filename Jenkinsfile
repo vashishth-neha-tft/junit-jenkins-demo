@@ -18,10 +18,19 @@ pipeline {
 
         stage('Show Build User') {
             steps {
-                wrap([$class: 'BuildUser']) {
-                    echo "Build triggered by user ID: ${env.BUILD_USER_ID}"
-                    echo "Build triggered by user name: ${env.BUILD_USER}"
-                    echo "Build triggered by user email: ${env.BUILD_USER_EMAIL}"
+                script {
+                    def userId = 'UNKNOWN'
+                    def userName = 'UNKNOWN'
+                    for (cause in currentBuild.rawBuild.getCauses()) {
+                        if (cause.userId) {
+                            userId = cause.userId
+                        }
+                        if (cause.userName) {
+                            userName = cause.userName
+                        }
+                    }
+                    echo "Build triggered by user ID: ${userId}"
+                    echo "Build triggered by user name: ${userName}"
                 }
             }
         }
